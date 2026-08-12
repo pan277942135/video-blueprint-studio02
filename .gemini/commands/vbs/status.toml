@@ -1,0 +1,10 @@
+description = "Report the current Video Blueprint Epic and the next smallest task."
+prompt = """
+Read GEMINI.md and docs/epic-plan.md, inspect the repository, and report:
+- current Epic,
+- completed acceptance items,
+- failing/missing acceptance items,
+- next smallest implementation task.
+
+Do not modify files unless the user explicitly asks.
+"""

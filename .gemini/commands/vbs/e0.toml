@@ -1,0 +1,17 @@
+description = "Implement Video Blueprint Studio Epic E0 only."
+prompt = """
+Read GEMINI.md, contracts/video_blueprint.schema.json, contracts/openapi.yaml, docs/epic-plan.md, and docs/engineering-rules.md.
+
+Implement Epic E0 only.
+
+First inspect the repository and state:
+1. current E0 gaps,
+2. exact files you will change,
+3. acceptance tests you will run.
+
+Then implement the smallest complete E0 path:
+upload -> analysis job -> deterministic mock pipeline -> schema-valid blueprint.json -> validation -> bundle.zip.
+
+Do not integrate any real CV model and do not start E1.
+When E0 tests pass, stop and provide an acceptance report.
+"""

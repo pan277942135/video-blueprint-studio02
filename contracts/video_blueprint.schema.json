@@ -1,0 +1,2044 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.video-blueprint/schema/video_blueprint.schema.json",
+  "title": "Video Blueprint Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "blueprint_id",
+    "created_at",
+    "source_video",
+    "timebase",
+    "processing",
+    "shots",
+    "characters",
+    "camera",
+    "environment",
+    "quality",
+    "artifacts",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+    },
+    "blueprint_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_video": {
+      "$ref": "#/$defs/SourceVideo"
+    },
+    "timebase": {
+      "$ref": "#/$defs/Timebase"
+    },
+    "processing": {
+      "$ref": "#/$defs/Processing"
+    },
+    "shots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Shot"
+      }
+    },
+    "characters": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Character"
+      }
+    },
+    "camera": {
+      "$ref": "#/$defs/Camera"
+    },
+    "environment": {
+      "$ref": "#/$defs/Environment"
+    },
+    "semantics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Semantics"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "quality": {
+      "$ref": "#/$defs/BlueprintQuality"
+    },
+    "artifacts": {
+      "$ref": "#/$defs/Artifacts"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "TimeSeriesRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uri",
+        "format",
+        "dtype",
+        "shape",
+        "axes",
+        "unit",
+        "coordinate_space",
+        "frame_start",
+        "frame_end",
+        "checksum_sha256"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "description": "Bundle-relative URI; must not be an arbitrary external URL."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "npz",
+            "npy",
+            "parquet",
+            "jsonl",
+            "png_sequence",
+            "rle_json"
+          ]
+        },
+        "dtype": {
+          "type": "string",
+          "enum": [
+            "float16",
+            "float32",
+            "float64",
+            "int16",
+            "int32",
+            "int64",
+            "uint8",
+            "bool"
+          ]
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "axes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unit": {
+          "type": "string"
+        },
+        "coordinate_space": {
+          "type": "string",
+          "enum": [
+            "none",
+            "pixel_xy",
+            "normalized_uv",
+            "camera_xyz",
+            "world_xyz",
+            "body_local_2d",
+            "body_local_3d"
+          ]
+        },
+        "sampling": {
+          "type": "string",
+          "enum": [
+            "per_frame",
+            "per_keyframe",
+            "irregular",
+            "per_shot"
+          ],
+          "default": "per_frame"
+        },
+        "frame_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frame_end": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "compression": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nan_policy": {
+          "type": "string",
+          "enum": [
+            "preserve",
+            "zero_fill",
+            "mask_ref"
+          ],
+          "default": "preserve"
+        },
+        "interpolation_policy": {
+          "type": "string",
+          "enum": [
+            "none",
+            "linear_short_gap",
+            "cubic_short_gap",
+            "hold"
+          ],
+          "default": "none"
+        },
+        "checksum_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "Quality": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "coverage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "SourceVideo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file_name",
+        "mime_type",
+        "container",
+        "file_size_bytes",
+        "sha256",
+        "duration_us",
+        "width",
+        "height",
+        "video_codec",
+        "fps_avg",
+        "variable_frame_rate",
+        "has_audio"
+      ],
+      "properties": {
+        "file_name": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "container": {
+          "type": "string"
+        },
+        "file_size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "duration_us": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "display_aspect_ratio": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pixel_aspect_ratio": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rotation_deg": {
+          "type": "integer",
+          "enum": [
+            0,
+            90,
+            180,
+            270
+          ]
+        },
+        "video_codec": {
+          "type": "string"
+        },
+        "pixel_format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bit_depth": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "color_primaries": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color_transfer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color_space": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fps_avg": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "fps_nominal": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "variable_frame_rate": {
+          "type": "boolean"
+        },
+        "source_frame_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "has_audio": {
+          "type": "boolean"
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "audio_sample_rate_hz": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "audio_channels": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "metadata_stripped": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Timebase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normalized_to_cfr",
+        "fps_num",
+        "fps_den",
+        "frame_count",
+        "frame_duration_us",
+        "start_pts_us",
+        "end_pts_us"
+      ],
+      "properties": {
+        "normalized_to_cfr": {
+          "type": "boolean"
+        },
+        "fps_num": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fps_den": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "frame_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "frame_duration_us": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "start_pts_us": {
+          "type": "integer"
+        },
+        "end_pts_us": {
+          "type": "integer"
+        },
+        "source_pts_map_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "job_id",
+        "status",
+        "requested_modules",
+        "pipeline_version",
+        "config_hash",
+        "execution_mode",
+        "stages"
+      ],
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "partial"
+          ]
+        },
+        "requested_modules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "pipeline_version": {
+          "type": "string"
+        },
+        "config_hash": {
+          "type": "string"
+        },
+        "execution_mode": {
+          "type": "string",
+          "enum": [
+            "offline_local",
+            "private_cloud"
+          ]
+        },
+        "hardware": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StageStatus"
+          }
+        }
+      }
+    },
+    "StageStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status",
+        "progress"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "succeeded",
+            "failed",
+            "skipped",
+            "cancelled"
+          ]
+        },
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Shot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shot_id",
+        "index",
+        "frame_start",
+        "frame_end",
+        "time_start_us",
+        "time_end_us",
+        "cut_in_type",
+        "cut_out_type",
+        "transition_score",
+        "keyframes",
+        "quality"
+      ],
+      "properties": {
+        "shot_id": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frame_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frame_end": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "time_start_us": {
+          "type": "integer"
+        },
+        "time_end_us": {
+          "type": "integer"
+        },
+        "cut_in_type": {
+          "type": "string",
+          "enum": [
+            "start",
+            "hard_cut",
+            "fade",
+            "dissolve",
+            "unknown"
+          ]
+        },
+        "cut_out_type": {
+          "type": "string",
+          "enum": [
+            "end",
+            "hard_cut",
+            "fade",
+            "dissolve",
+            "unknown"
+          ]
+        },
+        "transition_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Keyframe"
+          }
+        },
+        "dominant_character_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "camera_motion_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        }
+      }
+    },
+    "Keyframe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frame_idx",
+        "time_us",
+        "kind",
+        "score",
+        "image_uri"
+      ],
+      "properties": {
+        "frame_idx": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "time_us": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "first",
+            "middle",
+            "last",
+            "sharpest",
+            "pose_extreme",
+            "manual"
+          ]
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "image_uri": {
+          "type": "string"
+        }
+      }
+    },
+    "Character": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "character_id",
+        "track_label",
+        "presence",
+        "bbox_ref",
+        "visibility_ref",
+        "pose",
+        "face",
+        "hands",
+        "surface_motion",
+        "quality",
+        "privacy"
+      ],
+      "properties": {
+        "character_id": {
+          "type": "string"
+        },
+        "track_label": {
+          "type": "string"
+        },
+        "presence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FrameInterval"
+          }
+        },
+        "bbox_ref": {
+          "$ref": "#/$defs/TimeSeriesRef"
+        },
+        "center_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "person_mask_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility_ref": {
+          "$ref": "#/$defs/TimeSeriesRef"
+        },
+        "occlusion_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "appearance_reference_frames": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "pose": {
+          "$ref": "#/$defs/Pose"
+        },
+        "face": {
+          "$ref": "#/$defs/Face"
+        },
+        "hands": {
+          "$ref": "#/$defs/Hands"
+        },
+        "surface_motion": {
+          "$ref": "#/$defs/SurfaceMotion"
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        },
+        "privacy": {
+          "$ref": "#/$defs/CharacterPrivacy"
+        }
+      }
+    },
+    "FrameInterval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frame_start",
+        "frame_end"
+      ],
+      "properties": {
+        "frame_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frame_end": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "Pose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "skeleton_name",
+        "keypoint_count",
+        "keypoints_2d_ref",
+        "confidence_ref",
+        "smoothing",
+        "quality"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "skeleton_name": {
+          "type": "string"
+        },
+        "keypoint_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keypoint_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "keypoints_2d_ref": {
+          "$ref": "#/$defs/TimeSeriesRef"
+        },
+        "keypoints_3d_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_translation_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_rotation_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "joint_angles_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence_ref": {
+          "$ref": "#/$defs/TimeSeriesRef"
+        },
+        "smoothing": {
+          "$ref": "#/$defs/Smoothing"
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        }
+      }
+    },
+    "Face": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "landmark_count",
+        "quality"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "landmark_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bbox_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "landmarks_3d_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blendshapes_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transform_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "head_pose_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gaze_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eye_openness_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mouth_open_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blink_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TemporalEvent"
+          }
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        }
+      }
+    },
+    "Hands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "left",
+        "right"
+      ],
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/HandTrack"
+        },
+        "right": {
+          "$ref": "#/$defs/HandTrack"
+        }
+      }
+    },
+    "HandTrack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "landmark_count",
+        "quality"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "landmark_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "present_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bbox_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "landmarks_2d_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "landmarks_world_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "handedness_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "palm_normal_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finger_curl_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        }
+      }
+    },
+    "SurfaceMotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coordinate_frame",
+        "regions",
+        "quality"
+      ],
+      "properties": {
+        "coordinate_frame": {
+          "type": "string",
+          "enum": [
+            "body_local_2d",
+            "body_local_3d"
+          ]
+        },
+        "body_frame_transform_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "global_postural_sway_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SurfaceRegion"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TemporalEvent"
+          }
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        }
+      }
+    },
+    "SurfaceRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region_id",
+        "display_name",
+        "roi_definition",
+        "micro_motion",
+        "quality"
+      ],
+      "properties": {
+        "region_id": {
+          "type": "string",
+          "enum": [
+            "upper_torso_front",
+            "thorax",
+            "abdomen",
+            "pelvis",
+            "left_shoulder",
+            "right_shoulder",
+            "left_upper_thigh",
+            "right_upper_thigh",
+            "left_lower_thigh",
+            "right_lower_thigh",
+            "garment_front",
+            "custom"
+          ]
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "roi_definition": {
+          "$ref": "#/$defs/RoiDefinition"
+        },
+        "mask_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "track_points_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "residual_flow_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deformation_modes_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "micro_motion": {
+          "$ref": "#/$defs/MicroMotion"
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        }
+      }
+    },
+    "RoiDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "anchor_keypoints",
+        "expansion_ratio"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "pose_anchored_polygon",
+            "mask_intersection",
+            "manual_polygon"
+          ]
+        },
+        "anchor_keypoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expansion_ratio": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2.0
+        },
+        "manual_polygon_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MicroMotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "axis_2d",
+        "amplitude_px_p50",
+        "amplitude_norm_p50",
+        "periodicity_score",
+        "spatial_coherence",
+        "camera_leakage_score",
+        "pose_leakage_score",
+        "occlusion_ratio",
+        "confidence",
+        "usable_for_generation",
+        "smoothing"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "periodic_micro_motion",
+            "postural_sway",
+            "inertial_response",
+            "garment_deformation",
+            "unclassified",
+            "not_detected"
+          ]
+        },
+        "signal_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detrended_signal_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vertical_displacement_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "radial_expansion_ratio_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "area_change_ratio_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "velocity_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acceleration_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "axis_2d": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "amplitude_px_p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "amplitude_norm_p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "dominant_frequency_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "phase_rad": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "periodicity_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "spatial_coherence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "camera_leakage_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "pose_leakage_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "occlusion_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "usable_for_generation": {
+          "type": "boolean"
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "smoothing": {
+          "$ref": "#/$defs/Smoothing"
+        }
+      }
+    },
+    "Smoothing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "parameters"
+      ],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": [
+            "none",
+            "one_euro",
+            "savitzky_golay",
+            "kalman",
+            "robust_spline"
+          ]
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "TemporalEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "kind",
+        "frame_start",
+        "frame_end",
+        "confidence"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "frame_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frame_end": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "peak_frame": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "CharacterPrivacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "biometric_embedding_exported",
+        "identity_inference_performed"
+      ],
+      "properties": {
+        "biometric_embedding_exported": {
+          "const": false
+        },
+        "identity_inference_performed": {
+          "const": false
+        },
+        "authorization_attested": {
+          "type": "boolean"
+        },
+        "adult_subject_attested": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "per_shot",
+        "quality"
+      ],
+      "properties": {
+        "per_shot": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CameraShot"
+          }
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        }
+      }
+    },
+    "CameraShot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "camera_motion_id",
+        "shot_id",
+        "classification",
+        "reconstruction_backend",
+        "confidence"
+      ],
+      "properties": {
+        "camera_motion_id": {
+          "type": "string"
+        },
+        "shot_id": {
+          "type": "string"
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "static",
+            "pan",
+            "tilt",
+            "roll",
+            "zoom",
+            "dolly",
+            "truck",
+            "pedestal",
+            "handheld",
+            "compound",
+            "unknown"
+          ]
+        },
+        "affine_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "homography_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "crop_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "zoom_proxy_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shake_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "background_tracks_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intrinsics": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "extrinsics_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reconstruction_backend": {
+          "type": "string",
+          "enum": [
+            "opencv_ransac_2d",
+            "colmap",
+            "glomap",
+            "disabled"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "failure_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quality"
+      ],
+      "properties": {
+        "background_mask_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "depth_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "luminance_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exposure_change_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "white_balance_proxy_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blur_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occluder_tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        }
+      }
+    },
+    "Semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "shot_summaries",
+        "quality"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "model_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shot_summaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShotSemantic"
+          }
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality"
+        }
+      }
+    },
+    "ShotSemantic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shot_id",
+        "caption_zh",
+        "actions",
+        "camera_language",
+        "prompt_template"
+      ],
+      "properties": {
+        "shot_id": {
+          "type": "string"
+        },
+        "caption_zh": {
+          "type": "string"
+        },
+        "setting": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "wardrobe": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "props": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "camera_language": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "prompt_template": {
+          "type": "string"
+        },
+        "negative_constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "restricted_inferences_omitted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "BlueprintQuality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overall_score",
+        "module_scores",
+        "warnings",
+        "errors",
+        "low_confidence_intervals",
+        "reproducible"
+      ],
+      "properties": {
+        "overall_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "module_scores": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "low_confidence_intervals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FrameInterval"
+          }
+        },
+        "reproducible": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_uri",
+        "bundle_uri",
+        "overlays",
+        "reports"
+      ],
+      "properties": {
+        "manifest_uri": {
+          "type": "string"
+        },
+        "bundle_uri": {
+          "type": "string"
+        },
+        "overlays": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "reports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        }
+      }
+    },
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "uri",
+        "sha256"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "mime_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tools",
+        "system"
+      ],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolProvenance"
+          }
+        },
+        "system": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "ToolProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "module",
+        "tool",
+        "version",
+        "code_commit",
+        "weights_sha256",
+        "config_hash",
+        "license"
+      ],
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "code_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "weights_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config_hash": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

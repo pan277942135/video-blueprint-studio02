@@ -1,0 +1,21 @@
+project:
+  phase: E0
+  offline: true
+
+pipeline:
+  mode: mock
+  deterministic_seed: 20260812
+  analysis_fps_max: 30
+  proxy_long_edge: 1280
+
+source_limits:
+  max_video_seconds: 60
+  max_file_bytes: 2147483648
+
+privacy:
+  infer_identity: false
+  export_biometric_embeddings: false
+
+e0:
+  mock_completion_seconds_max: 10
+  allow_real_cv_models: false

@@ -1,0 +1,6 @@
+{
+  "name": "Video Blueprint Studio",
+  "description": "Offline-first video analysis and verifiable blueprint system (Epic E0).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

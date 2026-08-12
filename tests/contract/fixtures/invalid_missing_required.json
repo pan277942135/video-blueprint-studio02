@@ -1,0 +1,8 @@
+{
+  "blueprint_id": "invalid_missing_required",
+  "timebase": {
+    "fps_num": 30,
+    "fps_den": 1,
+    "frame_count": 300
+  }
+}

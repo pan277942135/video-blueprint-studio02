@@ -1,0 +1,23 @@
+{
+  "name": "Video Blueprint Gemini Project Pack",
+  "version": "0.1.0",
+  "current_epic": "E0",
+  "created_for": [
+    "Gemini Code Assist",
+    "Gemini CLI",
+    "Google AI Studio prompt handoff",
+    "Cloud Shell",
+    "Cloud Workstations"
+  ],
+  "canonical_contracts": [
+    "contracts/video_blueprint.schema.json",
+    "contracts/openapi.yaml",
+    "contracts/example_blueprint.json"
+  ],
+  "gemini_commands": [
+    "/vbs:e0",
+    "/vbs:validate",
+    "/vbs:status"
+  ],
+  "real_cv_models_allowed": false
+}

@@ -1,0 +1,17 @@
+description = "Validate the current Video Blueprint E0 contracts and implementation."
+prompt = """
+Read GEMINI.md and docs/validation-rules.md.
+
+Validate the current E0 repository without expanding scope.
+Check:
+- canonical schema/example contract,
+- API contract implementation,
+- deterministic mock output,
+- bundle structure,
+- schema validation,
+- negative contract tests,
+- no accidental real CV dependency.
+
+Report PASS/FAIL for each E0 acceptance item.
+Do not implement E1.
+"""

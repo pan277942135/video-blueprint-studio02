@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "blueprint_id": "invalid_biometric_data",
+  "source_video": {
+    "file_name": "sample.mp4",
+    "container": "mp4",
+    "codec": "h264",
+    "duration_sec": 10.0,
+    "fps_avg": 30.0,
+    "width": 1920,
+    "height": 1080,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "timebase": {
+    "fps_num": 30,
+    "fps_den": 1,
+    "frame_count": 300
+  },
+  "quality": {
+    "overall_score": 0.95,
+    "reproducible": true
+  },
+  "biometric_embedding": [0.12, -0.45, 0.88, 0.33]
+}

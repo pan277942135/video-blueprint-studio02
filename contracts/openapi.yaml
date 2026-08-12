@@ -1,0 +1,208 @@
+openapi: 3.1.0
+info:
+  title: Video Blueprint Studio API
+  version: 1.0.0
+  description: Local/offline API for video analysis and blueprint export.
+servers:
+  - url: http://localhost:8080/api/v1
+paths:
+  /videos:
+    post:
+      operationId: uploadVideo
+      summary: Upload a source video and create a video record.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, authorization_attested, adult_subject_attested]
+              properties:
+                file: {type: string, format: binary}
+                authorization_attested: {type: boolean}
+                adult_subject_attested: {type: boolean}
+      responses:
+        '201':
+          description: Video accepted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VideoRecord'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '413': {description: File too large.}
+        '415': {description: Unsupported or undecodable media.}
+  /analyses:
+    post:
+      operationId: createAnalysis
+      summary: Create an analysis job.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [video_id]
+              properties:
+                video_id: {type: string, format: uuid}
+                modules:
+                  type: array
+                  items: {type: string}
+                  default: [shots, people, pose, face, hands, masks, camera, flow, micro_motion, environment, overlays]
+                config_overrides: {type: object, additionalProperties: true}
+      responses:
+        '202':
+          description: Job queued.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AnalysisJob'}
+  /analyses/{analysis_id}:
+    get:
+      operationId: getAnalysis
+      summary: Get job status and stage progress.
+      parameters:
+        - {$ref: '#/components/parameters/AnalysisId'}
+      responses:
+        '200':
+          description: Current job state.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AnalysisJob'}
+  /analyses/{analysis_id}/cancel:
+    post:
+      operationId: cancelAnalysis
+      summary: Request cooperative cancellation.
+      parameters:
+        - {$ref: '#/components/parameters/AnalysisId'}
+      responses:
+        '202': {description: Cancellation requested.}
+  /analyses/{analysis_id}/retry:
+    post:
+      operationId: retryAnalysis
+      summary: Retry failed or selected stages.
+      parameters:
+        - {$ref: '#/components/parameters/AnalysisId'}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                stages: {type: array, items: {type: string}}
+                invalidate_downstream: {type: boolean, default: true}
+      responses:
+        '202': {description: Retry queued.}
+  /analyses/{analysis_id}/blueprint:
+    get:
+      operationId: getBlueprint
+      summary: Return the blueprint manifest JSON.
+      parameters:
+        - {$ref: '#/components/parameters/AnalysisId'}
+      responses:
+        '200':
+          description: Blueprint manifest.
+          content:
+            application/json:
+              schema:
+                $ref: './video_blueprint.schema.json'
+  /analyses/{analysis_id}/bundle:
+    get:
+      operationId: downloadBundle
+      summary: Download the complete bundle as ZIP.
+      parameters:
+        - {$ref: '#/components/parameters/AnalysisId'}
+      responses:
+        '200':
+          description: ZIP bundle.
+          content:
+            application/zip:
+              schema: {type: string, format: binary}
+  /analyses/{analysis_id}/artifacts:
+    get:
+      operationId: listArtifacts
+      summary: List overlays, plots and reports.
+      parameters:
+        - {$ref: '#/components/parameters/AnalysisId'}
+      responses:
+        '200':
+          description: Artifact list.
+  /analyses/{analysis_id}/annotations:
+    patch:
+      operationId: patchAnnotations
+      summary: Apply manual corrections to shots, tracks, masks or ROIs.
+      parameters:
+        - {$ref: '#/components/parameters/AnalysisId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operations]
+              properties:
+                operations:
+                  type: array
+                  items:
+                    type: object
+                    required: [op, path]
+                    properties:
+                      op: {type: string, enum: [add, replace, remove]}
+                      path: {type: string}
+                      value: {}
+      responses:
+        '200': {description: Annotation revision created.}
+  /analyses/{analysis_id}/validate:
+    post:
+      operationId: validateBlueprint
+      summary: Recompute schema, consistency and quality checks.
+      parameters:
+        - {$ref: '#/components/parameters/AnalysisId'}
+      responses:
+        '200': {description: Validation report.}
+  /analyses/{analysis_id}/events:
+    get:
+      operationId: streamProgress
+      summary: Server-Sent Events progress stream.
+      parameters:
+        - {$ref: '#/components/parameters/AnalysisId'}
+      responses:
+        '200':
+          description: text/event-stream.
+          content:
+            text/event-stream: {schema: {type: string}}
+components:
+  parameters:
+    AnalysisId:
+      name: analysis_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+  schemas:
+    VideoRecord:
+      type: object
+      required: [video_id, file_name, sha256, status]
+      properties:
+        video_id: {type: string, format: uuid}
+        file_name: {type: string}
+        sha256: {type: string}
+        status: {type: string, enum: [uploaded, validated, rejected]}
+    AnalysisJob:
+      type: object
+      required: [analysis_id, video_id, status, progress, stages]
+      properties:
+        analysis_id: {type: string, format: uuid}
+        video_id: {type: string, format: uuid}
+        status: {type: string, enum: [queued, running, succeeded, failed, cancelled, partial]}
+        progress: {type: number, minimum: 0, maximum: 1}
+        stages: {type: array, items: {type: object, additionalProperties: true}}
+        error: {$ref: '#/components/schemas/Error'}
+    Error:
+      type: object
+      properties:
+        code: {type: string}
+        message: {type: string}
+        details: {type: object, additionalProperties: true}
