@@ -104,13 +104,30 @@ def _execute_mock_analysis(analysis_id: str):
     video_sha256 = video.get("sha256", "0000000000000000000000000000000000000000000000000000000000000000")
     video_path = video.get("file_path")
     
-    blueprint, sidecars = run_deterministic_mock_pipeline(
-        job_id=analysis_id,
-        video_file_name=video_name,
-        video_sha256=video_sha256,
-        video_path=video_path
-    )
-    
+    try:
+        blueprint, sidecars = run_deterministic_mock_pipeline(
+            job_id=analysis_id,
+            video_file_name=video_name,
+            video_sha256=video_sha256,
+            video_path=video_path
+        )
+    except Exception as e:  # noqa: BLE001
+        failed_stages = [
+            {"stage": "shots", "status": "failed", "progress": 0.0},
+            {"stage": "people", "status": "failed", "progress": 0.0},
+            {"stage": "pose", "status": "failed", "progress": 0.0},
+            {"stage": "camera", "status": "failed", "progress": 0.0},
+            {"stage": "micro_motion", "status": "failed", "progress": 0.0}
+        ]
+        job_store.update_analysis(
+            analysis_id,
+            status="failed",
+            progress=0.0,
+            stages=failed_stages,
+            error={"code": "MEDIA_PROBE_FAILED", "message": str(e)}
+        )
+        return
+
     is_valid, val_errors = validator.validate(blueprint)
     val_report = {
         "valid": is_valid,
@@ -193,13 +210,21 @@ def retry_analysis(analysis_id: UUID, req: RetryAnalysisRequest | None = None):
 @app.get("/api/v1/analyses/{analysis_id}/blueprint")
 def get_blueprint(analysis_id: UUID):
     analysis_id_str = str(analysis_id)
-    bp = job_store.get_blueprint(analysis_id_str)
-    if not bp:
+    job = job_store.get_analysis(analysis_id_str)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Analysis {analysis_id_str} not found")
+    
+    if job["status"] in ["queued", "running"]:
+        _execute_mock_analysis(analysis_id_str)
         job = job_store.get_analysis(analysis_id_str)
-        if job:
-            _execute_mock_analysis(analysis_id_str)
-            bp = job_store.get_blueprint(analysis_id_str)
-            
+        
+    assert job is not None
+    if job.get("status") == "failed":
+        err_obj = job.get("error")
+        err_msg = err_obj.get("message") if isinstance(err_obj, dict) else "Unknown error"
+        raise HTTPException(status_code=400, detail=f"Analysis job failed: {err_msg}")
+
+    bp = job_store.get_blueprint(analysis_id_str)
     if not bp:
         raise HTTPException(status_code=404, detail=f"Blueprint for analysis {analysis_id_str} not found")
     return bp
@@ -207,13 +232,21 @@ def get_blueprint(analysis_id: UUID):
 @app.get("/api/v1/analyses/{analysis_id}/bundle")
 def download_bundle(analysis_id: UUID):
     analysis_id_str = str(analysis_id)
-    zip_path = job_store.get_bundle_path(analysis_id_str)
-    if not zip_path or not os.path.exists(zip_path):
+    job = job_store.get_analysis(analysis_id_str)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Analysis {analysis_id_str} not found")
+
+    if job["status"] in ["queued", "running"]:
+        _execute_mock_analysis(analysis_id_str)
         job = job_store.get_analysis(analysis_id_str)
-        if job:
-            _execute_mock_analysis(analysis_id_str)
-            zip_path = job_store.get_bundle_path(analysis_id_str)
-            
+
+    assert job is not None
+    if job.get("status") == "failed":
+        err_obj = job.get("error")
+        err_msg = err_obj.get("message") if isinstance(err_obj, dict) else "Unknown error"
+        raise HTTPException(status_code=400, detail=f"Analysis job failed: {err_msg}")
+
+    zip_path = job_store.get_bundle_path(analysis_id_str)
     if not zip_path or not os.path.exists(zip_path):
         raise HTTPException(status_code=404, detail=f"Bundle for analysis {analysis_id_str} not found")
     
@@ -226,13 +259,21 @@ def download_bundle(analysis_id: UUID):
 @app.post("/api/v1/analyses/{analysis_id}/validate", response_model=ValidationReport)
 def validate_analysis(analysis_id: UUID):
     analysis_id_str = str(analysis_id)
-    bp = job_store.get_blueprint(analysis_id_str)
-    if not bp:
+    job = job_store.get_analysis(analysis_id_str)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Analysis {analysis_id_str} not found")
+        
+    if job["status"] in ["queued", "running"]:
+        _execute_mock_analysis(analysis_id_str)
         job = job_store.get_analysis(analysis_id_str)
-        if job:
-            _execute_mock_analysis(analysis_id_str)
-            bp = job_store.get_blueprint(analysis_id_str)
-            
+
+    assert job is not None
+    if job.get("status") == "failed":
+        err_obj = job.get("error")
+        err_msg = err_obj.get("message") if isinstance(err_obj, dict) else "Unknown error"
+        raise HTTPException(status_code=400, detail=f"Analysis job failed: {err_msg}")
+
+    bp = job_store.get_blueprint(analysis_id_str)
     if not bp:
         raise HTTPException(status_code=404, detail=f"Analysis {analysis_id_str} not found")
         

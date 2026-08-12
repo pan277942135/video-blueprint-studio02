@@ -24,6 +24,10 @@ class NoVideoStreamError(MediaProbeError):
     """Raised when no video stream is present in the media file."""
 
 
+class TimingIndeterminateError(MediaProbeError):
+    """Raised when video timing or frame rate cannot be reliably determined."""
+
+
 def compute_sha256(file_path: str) -> str:
     """Compute stable SHA-256 hash for a local file."""
     if not os.path.exists(file_path):
@@ -117,6 +121,8 @@ class MediaProbeResult:
     variable_frame_rate: bool
     display_aspect_ratio: str | None
     pixel_aspect_ratio: str | None
+    video_stream_index: int
+    start_pts: int | None
     start_pts_us: int
     source_time_base: str | None
     has_audio: bool
@@ -172,7 +178,14 @@ class MediaProbeResult:
             frac = Fraction(self.fps_avg).limit_denominator(100000)
             num, den = frac.numerator, frac.denominator
 
-        frame_count = self.source_frame_count or max(1, round((self.duration_us / 1_000_000.0) * self.fps_avg))
+        if self.source_frame_count is None or self.source_frame_count < 1:
+            raise TimingIndeterminateError(
+                "Source frame count could not be reliably determined for canonical timebase."
+            )
+
+        frame_count = self.source_frame_count
+        # Note: This is the canonical nominal frame duration for the timebase,
+        # calculated from the rational frame rate, not the variable frame-by-frame duration.
         frame_duration_us = round(1_000_000.0 * den / num, 3)
         end_pts_us = self.start_pts_us + self.duration_us
 
@@ -191,7 +204,8 @@ class MediaProbeResult:
 def probe_media(video_path: str) -> MediaProbeResult:
     """
     Executes ffprobe to extract detailed technical video metadata.
-    Raises MediaProbeError subclasses on missing binary, invalid file, or missing streams.
+    Raises MediaProbeError subclasses on missing binary, invalid file, missing streams,
+    or indeterminate timing/frame rate.
     """
     if not os.path.exists(video_path) or not os.path.isfile(video_path):
         raise InvalidMediaError(f"Video file does not exist: {video_path}")
@@ -200,7 +214,7 @@ def probe_media(video_path: str) -> MediaProbeResult:
     if not ffprobe_bin:
         raise FFprobeNotFoundError("ffprobe executable was not found in PATH.")
 
-    cmd = [
+    cmd_stream = [
         ffprobe_bin,
         "-v", "quiet",
         "-print_format", "json",
@@ -210,7 +224,7 @@ def probe_media(video_path: str) -> MediaProbeResult:
     ]
 
     try:
-        res = subprocess.run(cmd, capture_output=True, check=True, text=True)
+        res = subprocess.run(cmd_stream, capture_output=True, check=True, text=True)
     except subprocess.CalledProcessError as e:
         raise InvalidMediaError(f"ffprobe execution failed on {video_path}: {e.stderr.strip()}") from e
 
@@ -229,8 +243,10 @@ def probe_media(video_path: str) -> MediaProbeResult:
     vstream = video_streams[0]
     audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
 
+    video_stream_index = int(vstream.get("index", 0))
     file_size_bytes = os.path.getsize(video_path)
 
+    # Duration
     duration_sec: float | None = None
     if "duration" in fmt and fmt["duration"] != "N/A":
         try:
@@ -248,6 +264,7 @@ def probe_media(video_path: str) -> MediaProbeResult:
 
     duration_us = round(duration_sec * 1_000_000)
 
+    # Dimensions
     try:
         width = int(vstream.get("width", 0))
         height = int(vstream.get("height", 0))
@@ -260,6 +277,7 @@ def probe_media(video_path: str) -> MediaProbeResult:
     video_codec = vstream.get("codec_name", "unknown")
     container = fmt.get("format_name", "unknown")
 
+    # Frame rate
     avg_fr_str = vstream.get("avg_frame_rate", "0/0")
     r_fr_str = vstream.get("r_frame_rate", "0/0")
 
@@ -268,28 +286,87 @@ def probe_media(video_path: str) -> MediaProbeResult:
 
     fps_avg = fps_avg_calc or fps_r_calc
     if not fps_avg or fps_avg <= 0:
-        raise InvalidMediaError(f"Invalid frame rate for {video_path}: avg={avg_fr_str}, r={r_fr_str}")
+        raise TimingIndeterminateError(f"Invalid or missing frame rate for {video_path}: avg={avg_fr_str}, r={r_fr_str}")
 
     fps_nominal = fps_r_calc or fps_avg
 
-    vfr = False
-    if fps_avg_calc and fps_r_calc and abs(fps_avg_calc - fps_r_calc) > 0.05:
-        vfr = True
+    # Time Base & Start PTS Calculation
+    source_time_base = vstream.get("time_base")
+    start_pts_raw = vstream.get("start_pts")
+    start_pts: int | None = None
+    if start_pts_raw is not None and str(start_pts_raw).lstrip("-").isdigit():
+        start_pts = int(start_pts_raw)
 
-    source_frame_count: int | None = None
-    if "nb_frames" in vstream and str(vstream["nb_frames"]).isdigit():
-        source_frame_count = int(vstream["nb_frames"])
-    if not source_frame_count:
-        source_frame_count = max(1, round(duration_sec * fps_avg))
-
-    start_time_str = vstream.get("start_time") or fmt.get("start_time")
     start_pts_us = 0
-    if start_time_str and start_time_str != "N/A":
-        try:
-            start_pts_us = round(float(start_time_str) * 1_000_000)
-        except ValueError:
-            pass
+    if start_pts is not None and source_time_base:
+        tb_num, tb_den, _ = _parse_fraction(source_time_base)
+        if tb_num and tb_den:
+            start_pts_us = round(start_pts * (tb_num / tb_den) * 1_000_000)
 
+    if start_pts_us == 0:
+        start_time_str = vstream.get("start_time") or fmt.get("start_time")
+        if start_time_str and start_time_str != "N/A":
+            try:
+                start_pts_us = round(float(start_time_str) * 1_000_000)
+            except ValueError:
+                pass
+
+    # Frame Timestamp Inspection for Conservative VFR & Frame Count
+    cmd_frames = [
+        ffprobe_bin,
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_entries", "frame=pkt_pts,pkt_pts_time,best_effort_timestamp_time,pkt_duration_time",
+        "-select_streams", "v:0",
+        video_path
+    ]
+
+    frames_data: list[dict[str, Any]] = []
+    try:
+        res_frames = subprocess.run(cmd_frames, capture_output=True, check=True, text=True)
+        frames_data = json.loads(res_frames.stdout).get("frames", [])
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        pass
+
+    # Source frame count priority: nb_frames -> len(frames_data) -> None
+    source_frame_count: int | None = None
+    if "nb_frames" in vstream and str(vstream["nb_frames"]).isdigit() and int(vstream["nb_frames"]) > 0:
+        source_frame_count = int(vstream["nb_frames"])
+    elif len(frames_data) > 0:
+        source_frame_count = len(frames_data)
+
+    # Conservative VFR detection
+    vfr = False
+    frame_timestamps: list[float] = []
+    for f in frames_data:
+        ts_val = f.get("best_effort_timestamp_time") or f.get("pkt_pts_time")
+        if ts_val is not None and ts_val != "N/A":
+            try:
+                frame_timestamps.append(float(ts_val))
+            except ValueError:
+                pass
+
+    if len(frame_timestamps) >= 2:
+        deltas = [frame_timestamps[i + 1] - frame_timestamps[i] for i in range(len(frame_timestamps) - 1)]
+        if any(d <= 0 for d in deltas):
+            raise TimingIndeterminateError(f"Non-positive or non-monotonic frame delta encountered in {video_path}")
+
+        max_delta = max(deltas)
+        min_delta = min(deltas)
+        # If delta variation > 2ms or fraction divergence > 0.05
+        if (max_delta - min_delta) > 0.002 or (fps_avg_calc and fps_r_calc and abs(fps_avg_calc - fps_r_calc) > 0.05):
+            vfr = True
+        else:
+            vfr = False
+    elif fps_avg_calc and fps_r_calc:
+        if abs(fps_avg_calc - fps_r_calc) > 0.05:
+            vfr = True
+        else:
+            vfr = False
+    else:
+        raise TimingIndeterminateError(f"Frame timing and frame rate cannot be reliably determined for {video_path}")
+
+    # Optional metadata fields
     pixel_format = vstream.get("pix_fmt")
     if pixel_format in ("none", "N/A"):
         pixel_format = None
@@ -345,8 +422,10 @@ def probe_media(video_path: str) -> MediaProbeResult:
         variable_frame_rate=vfr,
         display_aspect_ratio=dar,
         pixel_aspect_ratio=par,
+        video_stream_index=video_stream_index,
+        start_pts=start_pts,
         start_pts_us=start_pts_us,
-        source_time_base=vstream.get("time_base"),
+        source_time_base=source_time_base,
         has_audio=has_audio,
         audio_codec=audio_codec,
         audio_sample_rate_hz=audio_sample_rate_hz,

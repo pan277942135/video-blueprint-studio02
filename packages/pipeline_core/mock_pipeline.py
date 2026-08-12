@@ -3,7 +3,7 @@ import os
 import uuid
 from typing import Any
 
-from packages.pipeline_core.media_probe import MediaProbeError, compute_sha256, probe_media
+from packages.pipeline_core.media_probe import InvalidMediaError, compute_sha256, probe_media
 
 
 def generate_deterministic_hash(seed: str) -> str:
@@ -25,15 +25,14 @@ def run_deterministic_mock_pipeline(
     
     probe_source_video = None
     probe_timebase = None
-    if video_path and os.path.exists(video_path):
-        try:
-            real_sha256 = compute_sha256(video_path)
-            probe_res = probe_media(video_path)
-            probe_source_video = probe_res.to_source_video_dict(video_file_name, real_sha256)
-            probe_timebase = probe_res.to_timebase_dict()
-            valid_sha256 = real_sha256
-        except (MediaProbeError, OSError, ValueError):
-            valid_sha256 = video_sha256 if len(video_sha256) == 64 else hash_seed
+    if video_path is not None:
+        if not os.path.exists(video_path):
+            raise InvalidMediaError(f"Specified video_path does not exist: {video_path}")
+        real_sha256 = compute_sha256(video_path)
+        probe_res = probe_media(video_path)
+        probe_source_video = probe_res.to_source_video_dict(video_file_name, real_sha256)
+        probe_timebase = probe_res.to_timebase_dict()
+        valid_sha256 = real_sha256
     else:
         valid_sha256 = video_sha256 if len(video_sha256) == 64 else hash_seed
     

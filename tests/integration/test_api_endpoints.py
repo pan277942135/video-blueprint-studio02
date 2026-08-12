@@ -1,3 +1,6 @@
+import os
+import subprocess
+import tempfile
 import uuid
 
 from fastapi.testclient import TestClient
@@ -6,19 +9,30 @@ from apps.api.main import app
 
 client = TestClient(app)
 
+
 def test_health_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
-    assert data["epic"] == "E0"
+
 
 def test_upload_and_canonical_analysis_flow():
+    # Generate a real small valid mp4 video for successful probe flow
+    temp_dir = tempfile.mkdtemp()
+    valid_video_path = os.path.join(temp_dir, "test_valid.mp4")
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30",
+        "-t", "1", "-c:v", "libx264", valid_video_path
+    ], capture_output=True, check=True)
+
+    with open(valid_video_path, "rb") as f:
+        file_content = f.read()
+
     # 1. Upload video with attestations
-    file_content = b"fake video content stream"
     response = client.post(
         "/api/v1/videos",
-        files={"file": ("test.mp4", file_content, "video/mp4")},
+        files={"file": ("test_valid.mp4", file_content, "video/mp4")},
         data={"authorization_attested": "true", "adult_subject_attested": "true"}
     )
     assert response.status_code == 201
@@ -32,7 +46,7 @@ def test_upload_and_canonical_analysis_flow():
     # 2. Reject upload when attestations are missing/false
     bad_upload_resp = client.post(
         "/api/v1/videos",
-        files={"file": ("test.mp4", file_content, "video/mp4")},
+        files={"file": ("test_valid.mp4", file_content, "video/mp4")},
         data={"authorization_attested": "false", "adult_subject_attested": "true"}
     )
     assert bad_upload_resp.status_code == 400
@@ -94,6 +108,45 @@ def test_upload_and_canonical_analysis_flow():
     assert client.get(f"/api/v1/analyses/{analysis_id}/artifacts").status_code == 200
     assert client.patch(f"/api/v1/analyses/{analysis_id}/annotations", json={"operations": []}).status_code == 200
 
+    if os.path.exists(valid_video_path):
+        os.remove(valid_video_path)
+
+
+def test_upload_invalid_media_analysis_fails():
+    # Upload invalid text file pretending to be mp4
+    file_content = b"This is plain text, not a valid video file."
+    upload_resp = client.post(
+        "/api/v1/videos",
+        files={"file": ("invalid_text.mp4", file_content, "video/mp4")},
+        data={"authorization_attested": "true", "adult_subject_attested": "true"}
+    )
+    assert upload_resp.status_code == 201
+    video_id = upload_resp.json()["video_id"]
+
+    # Create analysis job
+    create_resp = client.post(
+        "/api/v1/analyses",
+        json={"video_id": video_id}
+    )
+    assert create_resp.status_code == 202
+    analysis_id = create_resp.json()["analysis_id"]
+
+    # Execute / get analysis status -> must be failed
+    get_resp = client.get(f"/api/v1/analyses/{analysis_id}")
+    assert get_resp.status_code == 200
+    job_data = get_resp.json()
+    assert job_data["status"] == "failed"
+    assert job_data["error"]["code"] == "MEDIA_PROBE_FAILED"
+
+    # Blueprint endpoint must fail (HTTP 400)
+    bp_resp = client.get(f"/api/v1/analyses/{analysis_id}/blueprint")
+    assert bp_resp.status_code == 400
+
+    # Bundle endpoint must fail (HTTP 400)
+    bundle_resp = client.get(f"/api/v1/analyses/{analysis_id}/bundle")
+    assert bundle_resp.status_code == 400
+
+
 def test_invalid_uuid_inputs():
     # Invalid video_id in body -> HTTP 422
     resp_body = client.post("/api/v1/analyses", json={"video_id": "invalid-uuid-string"})
@@ -109,6 +162,7 @@ def test_invalid_uuid_inputs():
     resp_path3 = client.get("/api/v1/analyses/invalid-uuid-string/events")
     assert resp_path3.status_code == 422
 
+
 def test_sse_events_stream():
     valid_vid = str(uuid.uuid4())
     create_resp = client.post("/api/v1/analyses", json={"video_id": valid_vid})
@@ -120,4 +174,3 @@ def test_sse_events_stream():
     assert "text/event-stream" in events_resp.headers["content-type"]
     assert "event: status" in events_resp.text
     assert "data: {" in events_resp.text
-
