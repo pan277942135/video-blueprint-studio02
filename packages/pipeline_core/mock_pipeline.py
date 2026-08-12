@@ -14,10 +14,18 @@ def run_deterministic_mock_pipeline(job_id: str, video_file_name: str, video_sha
     hash_seed = generate_deterministic_hash(f"{job_id}:{video_file_name}")
     valid_sha256 = video_sha256 if len(video_sha256) == 64 else hash_seed
     
+    # Ensure canonical UUID strings for blueprint_id and job_id
+    try:
+        valid_job_id = str(uuid.UUID(job_id))
+    except ValueError:
+        valid_job_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"job:{job_id}"))
+        
+    blueprint_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"blueprint:{valid_job_id}"))
+    
     # 1. Blueprint Manifest matching canonical schema
     blueprint = {
         "schema_version": "1.0.0",
-        "blueprint_id": f"00000000-0000-4000-8000-{hash_seed[:12]}",
+        "blueprint_id": blueprint_uuid,
         "created_at": "2026-08-12T00:00:00Z",
         "source_video": {
             "file_name": video_file_name,
@@ -58,7 +66,7 @@ def run_deterministic_mock_pipeline(job_id: str, video_file_name: str, video_sha
             "source_pts_map_ref": None
         },
         "processing": {
-            "job_id": f"00000000-0000-4000-8000-{job_id[:12].zfill(12)}",
+            "job_id": valid_job_id,
             "status": "succeeded",
             "requested_modules": [
                 "shots", "people", "pose", "face", "hands",

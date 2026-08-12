@@ -1,0 +1,98 @@
+{
+  "schema_version": "1.0.0",
+  "blueprint_id": "not-a-valid-uuid-string",
+  "created_at": "2026-08-07T03:38:00Z",
+  "source_video": {
+    "file_name": "sample.mp4",
+    "mime_type": "video/mp4",
+    "container": "mov,mp4,m4a,3gp,3g2,mj2",
+    "file_size_bytes": 10485760,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "duration_us": 6000000,
+    "width": 1080,
+    "height": 1920,
+    "display_aspect_ratio": "9:16",
+    "pixel_aspect_ratio": "1:1",
+    "rotation_deg": 0,
+    "video_codec": "h264",
+    "pixel_format": "yuv420p",
+    "bit_depth": 8,
+    "color_primaries": "bt709",
+    "color_transfer": "bt709",
+    "color_space": "bt709",
+    "fps_avg": 30.0,
+    "fps_nominal": 30.0,
+    "variable_frame_rate": false,
+    "source_frame_count": 180,
+    "has_audio": false,
+    "audio_codec": null,
+    "audio_sample_rate_hz": null,
+    "audio_channels": null,
+    "metadata_stripped": true
+  },
+  "timebase": {
+    "normalized_to_cfr": true,
+    "fps_num": 30,
+    "fps_den": 1,
+    "frame_count": 180,
+    "frame_duration_us": 33333.333,
+    "start_pts_us": 0,
+    "end_pts_us": 5966667,
+    "source_pts_map_ref": null
+  },
+  "processing": {
+    "job_id": "00000000-0000-4000-8000-000000000002",
+    "status": "succeeded",
+    "requested_modules": ["shots"],
+    "started_at": "2026-08-07T03:30:00Z",
+    "completed_at": "2026-08-07T03:37:00Z",
+    "pipeline_version": "1.0.0",
+    "config_hash": "cfg-demo",
+    "execution_mode": "offline_local",
+    "hardware": {"gpu": "NVIDIA GPU", "vram_gb": 24},
+    "stages": []
+  },
+  "shots": [],
+  "characters": [],
+  "camera": {
+    "trajectories": [],
+    "intrinsics": {
+      "model": "pinhole",
+      "focal_length_px": 1000.0,
+      "principal_point_px": [540.0, 960.0],
+      "radial_distortion": [0.0, 0.0],
+      "tangential_distortion": [0.0, 0.0],
+      "estimated": true
+    },
+    "extrinsics_world_ref": null,
+    "motion_type": "static",
+    "stability_score": 1.0,
+    "calibration_confidence": 1.0
+  },
+  "environment": {
+    "scene_type": "indoor",
+    "lighting": {"type": "artificial", "key_light_direction": [0.0, 0.0, 1.0], "color_temperature_k": 5500},
+    "audio_scene": null,
+    "bounding_box_3d": null
+  },
+  "quality": {
+    "overall_score": 0.95,
+    "completeness": 1.0,
+    "temporal_consistency": 0.95,
+    "reconstruction_error": 0.02,
+    "warnings": [],
+    "errors": []
+  },
+  "artifacts": {
+    "keyframes_dir": "artifacts/keyframes",
+    "sidecars_dir": "sidecars",
+    "overlays_dir": "artifacts/overlays",
+    "reports_dir": "artifacts/reports"
+  },
+  "provenance": {
+    "blueprint_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "operator_id": "op_local",
+    "environment_hash": "env-local",
+    "signatures": []
+  }
+}

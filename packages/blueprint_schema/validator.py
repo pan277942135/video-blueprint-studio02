@@ -18,7 +18,8 @@ class BlueprintValidator:
         if schema is None:
             schema = load_canonical_schema()
         self.schema = schema
-        self.validator = jsonschema.Draft202012Validator(schema)
+        self.format_checker = jsonschema.FormatChecker()
+        self.validator = jsonschema.Draft202012Validator(schema, format_checker=self.format_checker)
 
     def validate(self, blueprint_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """

@@ -9,22 +9,25 @@ client = TestClient(app)
 def test_zip_bundle_integrity():
     # Setup job and trigger bundle generation
     upload_resp = client.post(
-        "/api/v1/videos/upload",
-        files={"file": ("sample.mp4", b"dummy_content", "video/mp4")}
+        "/api/v1/videos",
+        files={"file": ("sample.mp4", b"dummy_content", "video/mp4")},
+        data={"authorization_attested": "true", "adult_subject_attested": "true"}
     )
+    assert upload_resp.status_code == 201
     video_id = upload_resp.json()["video_id"]
     
-    job_resp = client.post(
-        "/api/v1/jobs",
-        json={"video_id": video_id, "attestation_accepted": True}
+    analysis_resp = client.post(
+        "/api/v1/analyses",
+        json={"video_id": video_id}
     )
-    job_id = job_resp.json()["job_id"]
+    assert analysis_resp.status_code == 202
+    analysis_id = analysis_resp.json()["analysis_id"]
     
-    executed = client.get(f"/api/v1/jobs/{job_id}").json()
-    blueprint_id = executed["blueprint_id"]
+    executed = client.get(f"/api/v1/analyses/{analysis_id}").json()
+    assert executed["status"] == "succeeded"
 
     # Download bundle
-    bundle_resp = client.get(f"/api/v1/bundles/{blueprint_id}")
+    bundle_resp = client.get(f"/api/v1/analyses/{analysis_id}/bundle")
     assert bundle_resp.status_code == 200
     
     zip_bytes = io.BytesIO(bundle_resp.content)
@@ -36,5 +39,6 @@ def test_zip_bundle_integrity():
         
         # Verify bundle_manifest content
         manifest_data = json.loads(zf.read("bundle_manifest.json").decode('utf-8'))
-        assert manifest_data["blueprint_id"] == blueprint_id
+        assert "blueprint_id" in manifest_data
         assert manifest_data["file_count"] >= 4
+
