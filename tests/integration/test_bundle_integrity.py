@@ -52,6 +52,8 @@ def test_zip_bundle_integrity():
         assert "blueprint.json" in namelist
         assert "bundle_manifest.json" in namelist
         assert "validation_report.json" in namelist
+        assert "artifacts/normalized/analysis_cfr.mp4" in namelist
+        assert "artifacts/timeseries/source_pts_map.npz" in namelist
 
         # Verify bundle_manifest content
         manifest_data = json.loads(zf.read("bundle_manifest.json").decode('utf-8'))

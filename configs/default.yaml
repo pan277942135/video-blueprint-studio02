@@ -19,3 +19,12 @@ privacy:
 e0:
   mock_completion_seconds_max: 10
   allow_real_cv_models: false
+
+normalization:
+  enabled: true
+  analysis_fps_max: 30
+  video_codec: libx264
+  preset: veryfast
+  crf: 12
+  fps_rounding: near
+  max_av_drift_us: 50000

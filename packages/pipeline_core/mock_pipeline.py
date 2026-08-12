@@ -3,6 +3,7 @@ import os
 import uuid
 from typing import Any
 
+from packages.pipeline_core.media_normalizer import normalize_media_to_cfr
 from packages.pipeline_core.media_probe import InvalidMediaError, compute_sha256, probe_media
 
 
@@ -25,13 +26,53 @@ def run_deterministic_mock_pipeline(
     
     probe_source_video = None
     probe_timebase = None
+    normalized_sidecars: dict[str, Any] = {}
     if video_path is not None:
         if not os.path.exists(video_path):
             raise InvalidMediaError(f"Specified video_path does not exist: {video_path}")
         real_sha256 = compute_sha256(video_path)
         probe_res = probe_media(video_path)
         probe_source_video = probe_res.to_source_video_dict(video_file_name, real_sha256)
-        probe_timebase = probe_res.to_timebase_dict()
+
+        output_dir = os.path.dirname(video_path)
+        norm_res = normalize_media_to_cfr(
+            video_path=video_path,
+            probe_result=probe_res,
+            output_dir=output_dir,
+            analysis_fps_max=30
+        )
+
+        probe_timebase = {
+            "normalized_to_cfr": True,
+            "fps_num": norm_res.fps_num,
+            "fps_den": norm_res.fps_den,
+            "frame_count": norm_res.frame_count,
+            "frame_duration_us": norm_res.frame_duration_us,
+            "start_pts_us": 0,
+            "end_pts_us": norm_res.end_pts_us,
+            "source_pts_map_ref": {
+                "uri": "artifacts/timeseries/source_pts_map.npz",
+                "format": "npz",
+                "dtype": "int64",
+                "shape": [norm_res.frame_count, 2],
+                "axes": ["frame", "time_pair"],
+                "unit": "us",
+                "coordinate_space": "none",
+                "sampling": "per_frame",
+                "frame_start": 0,
+                "frame_end": norm_res.frame_count - 1,
+                "checksum_sha256": norm_res.source_pts_map_sha256,
+                "metadata": {
+                    "columns": ["normalized_pts_us", "source_pts_us"],
+                    "mapping_policy": "nearest",
+                    "source_start_pts_us": probe_res.start_pts_us,
+                    "target_fps_num": norm_res.fps_num,
+                    "target_fps_den": norm_res.fps_den
+                }
+            }
+        }
+        normalized_sidecars["artifacts/normalized/analysis_cfr.mp4"] = norm_res.normalized_video_path
+        normalized_sidecars["artifacts/timeseries/source_pts_map.npz"] = norm_res.source_pts_map_path
         valid_sha256 = real_sha256
     else:
         valid_sha256 = video_sha256 if len(video_sha256) == 64 else hash_seed
@@ -227,5 +268,6 @@ def run_deterministic_mock_pipeline(
             "data": "100x200:10000"
         }
     }
+    sidecars.update(normalized_sidecars)
 
     return blueprint, sidecars

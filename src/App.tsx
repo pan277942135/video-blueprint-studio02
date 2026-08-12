@@ -48,45 +48,65 @@ export default function App() {
   useEffect(() => {
     if (!selectedJobId) return;
 
+    let isMounted = true;
     const fetchBlueprint = async () => {
       try {
         const bpRes = await fetch(`/api/v1/analyses/${selectedJobId}/blueprint`);
+        if (!isMounted) return;
         const bpType = bpRes.headers.get('content-type');
         if (bpRes.ok && bpType && bpType.includes('application/json')) {
           const bpData = await bpRes.json();
+          if (!isMounted) return;
           setActiveBlueprint(bpData);
 
           // Validate blueprint
           const valRes = await fetch(`/api/v1/analyses/${selectedJobId}/validate`, { method: 'POST' });
+          if (!isMounted) return;
           const valType = valRes.headers.get('content-type');
           if (valRes.ok && valType && valType.includes('application/json')) {
             const valData = await valRes.json();
+            if (!isMounted) return;
             setValidationReport(valData);
             setContractStatus(valData.valid ? 'valid' : 'invalid');
           }
         }
-      } catch (err) {
-        console.error('Failed to fetch blueprint:', err);
+      } catch {
+        // Ignore transient network errors during load
       }
     };
 
     fetchBlueprint();
 
-    // Setup SSE or polling for live progress updates
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedJobId]);
+
+  // Periodic polling for job status & list updates
+  useEffect(() => {
+    let isMounted = true;
     const interval = setInterval(async () => {
       try {
         const jRes = await fetch('/api/v1/analyses');
+        if (!isMounted) return;
         const jType = jRes.headers.get('content-type');
         if (jRes.ok && jType && jType.includes('application/json')) {
           const updatedJobs: AnalysisJob[] = await jRes.json();
+          if (!isMounted) return;
           setJobs(updatedJobs);
+          if (updatedJobs.length > 0 && !selectedJobId) {
+            setSelectedJobId(updatedJobs[0].analysis_id);
+          }
         }
-      } catch (err) {
-        console.error('Polling error:', err);
+      } catch {
+        // Silently handle network glitches during polling
       }
-    }, 1000);
+    }, 2000);
 
-    return () => clearInterval(interval);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [selectedJobId]);
 
   // Handler: Upload Video

@@ -3,7 +3,7 @@ import json
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any
 
@@ -129,6 +129,7 @@ class MediaProbeResult:
     audio_codec: str | None
     audio_sample_rate_hz: int | None
     audio_channels: int | None
+    frame_timestamps: list[float] = field(default_factory=list)
 
     def to_source_video_dict(self, file_name: str, sha256_hash: str) -> dict[str, Any]:
         ext = os.path.splitext(file_name)[1].lower()
@@ -427,5 +428,6 @@ def probe_media(video_path: str) -> MediaProbeResult:
         has_audio=has_audio,
         audio_codec=audio_codec,
         audio_sample_rate_hz=audio_sample_rate_hz,
-        audio_channels=audio_channels
+        audio_channels=audio_channels,
+        frame_timestamps=frame_timestamps
     )

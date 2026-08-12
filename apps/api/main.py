@@ -20,6 +20,8 @@ from packages.blueprint_schema.models import (
 )
 from packages.blueprint_schema.validator import BlueprintValidator
 from packages.pipeline_core.bundle_exporter import create_bundle_zip
+from packages.pipeline_core.media_normalizer import MediaNormalizationError
+from packages.pipeline_core.media_probe import MediaProbeError
 from packages.pipeline_core.mock_pipeline import run_deterministic_mock_pipeline
 
 app = FastAPI(
@@ -112,6 +114,13 @@ def _execute_mock_analysis(analysis_id: str):
             video_path=video_path
         )
     except Exception as e:  # noqa: BLE001
+        if isinstance(e, MediaNormalizationError):
+            err_code = "MEDIA_NORMALIZATION_FAILED"
+        elif isinstance(e, MediaProbeError):
+            err_code = "MEDIA_PROBE_FAILED"
+        else:
+            err_code = "ANALYSIS_FAILED"
+
         failed_stages = [
             {"stage": "shots", "status": "failed", "progress": 0.0},
             {"stage": "people", "status": "failed", "progress": 0.0},
@@ -124,7 +133,7 @@ def _execute_mock_analysis(analysis_id: str):
             status="failed",
             progress=0.0,
             stages=failed_stages,
-            error={"code": "MEDIA_PROBE_FAILED", "message": str(e)}
+            error={"code": err_code, "message": str(e)}
         )
         return
 
