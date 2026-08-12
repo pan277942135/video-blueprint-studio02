@@ -1,16 +1,17 @@
-# Video Blueprint Studio — Milestone 1 (Epic E0)
+# Video Blueprint Studio — Milestone 1 (Epic E1.1 Real Media Probe)
 
 Video Blueprint Studio M1 is an offline-first video analysis and verifiable-blueprint system.
 The system converts authorized source videos into structured, reproducible **Video Blueprint bundles** preserving timing, camera motion, anonymous character motion, pose, landmarks, masks, surface residual motion, micro-motion, quality, and provenance.
 
-> **Status Notice**: The project is currently in **Epic E0: Contract & Engineering Skeleton ONLY**. No real CV/AI models (e.g. RTMDet, RTMW, SAM 2, MediaPipe) or identity replacement models are integrated in E0.
+> **Status Notice**: The project is currently in **Epic E1.1: Real Media Probe**. Media metadata probing uses system `ffprobe`/`ffmpeg` CLI via subprocess. No heavy CV/AI models or identity replacement models are integrated in E1.1.
 
 ---
 
-## 🚀 Epic E0 Runbook
+## 🚀 Epic E1 Runbook
 
 ### Prerequisites
 - **Python**: 3.11+
+- **System Dependencies**: `ffmpeg` and `ffprobe` binaries in PATH
 - **Docker** & **Docker Compose** (optional for containerized setup)
 
 ### 1. Installation & Environment Setup

@@ -48,7 +48,7 @@ def health_check():
     }
 
 @app.post("/api/v1/videos", response_model=VideoRecord, status_code=status.HTTP_201_CREATED)
-async def upload_video(
+def upload_video(
     file: UploadFile = File(...),
     authorization_attested: bool = Form(...),
     adult_subject_attested: bool = Form(...)
@@ -59,12 +59,19 @@ async def upload_video(
             detail="Both authorization_attested and adult_subject_attested must be true."
         )
 
-    contents = await file.read()
+    contents = file.file.read()
     sha256_hash = hashlib.sha256(contents).hexdigest()
     
+    file_name = file.filename or "uploaded_video.mp4"
+    temp_dir = tempfile.gettempdir()
+    saved_path = os.path.join(temp_dir, f"vbs_upload_{sha256_hash[:12]}_{file_name}")
+    with open(saved_path, "wb") as f:
+        f.write(contents)
+
     video_record = job_store.store_video(
-        file_name=file.filename or "uploaded_video.mp4",
-        sha256_hash=sha256_hash
+        file_name=file_name,
+        sha256_hash=sha256_hash,
+        file_path=saved_path
     )
     
     return VideoRecord.model_validate(video_record)
@@ -95,8 +102,14 @@ def _execute_mock_analysis(analysis_id: str):
     video = job_store.videos.get(job["video_id"], {})
     video_name = video.get("file_name", "sample_video.mp4")
     video_sha256 = video.get("sha256", "0000000000000000000000000000000000000000000000000000000000000000")
+    video_path = video.get("file_path")
     
-    blueprint, sidecars = run_deterministic_mock_pipeline(analysis_id, video_name, video_sha256)
+    blueprint, sidecars = run_deterministic_mock_pipeline(
+        job_id=analysis_id,
+        video_file_name=video_name,
+        video_sha256=video_sha256,
+        video_path=video_path
+    )
     
     is_valid, val_errors = validator.validate(blueprint)
     val_report = {

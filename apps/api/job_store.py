@@ -14,12 +14,19 @@ class InMemoryJobStore:
         self.sidecars: dict[str, dict[str, Any]] = {}
         self.bundle_paths: dict[str, str] = {}
 
-    def store_video(self, file_name: str, sha256_hash: str, custom_video_id: str | None = None) -> dict[str, Any]:
+    def store_video(
+        self,
+        file_name: str,
+        sha256_hash: str,
+        custom_video_id: str | None = None,
+        file_path: str | None = None
+    ) -> dict[str, Any]:
         video_id = custom_video_id or str(uuid.uuid4())
         video_record = {
             "video_id": video_id,
             "file_name": file_name,
             "sha256": sha256_hash,
+            "file_path": file_path,
             "status": "uploaded"
         }
         self.videos[video_id] = video_record

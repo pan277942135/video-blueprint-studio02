@@ -1,19 +1,41 @@
 import hashlib
+import os
 import uuid
 from typing import Any
+
+from packages.pipeline_core.media_probe import MediaProbeError, compute_sha256, probe_media
 
 
 def generate_deterministic_hash(seed: str) -> str:
     return hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
-def run_deterministic_mock_pipeline(job_id: str, video_file_name: str, video_sha256: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def run_deterministic_mock_pipeline(
+    job_id: str,
+    video_file_name: str,
+    video_sha256: str,
+    video_path: str | None = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """
-    Deterministic Mock Pipeline for Epic E0.
+    Deterministic Mock Pipeline for Epic E0/E1.
     Produces a canonical, schema-valid Blueprint manifest matching contracts/video_blueprint.schema.json.
     Uses zero real CV models, produces zero biometric data, and embeds no dense motion vectors in the manifest.
+    If video_path is provided and exists, uses real ffprobe media probing.
     """
     hash_seed = generate_deterministic_hash(f"{job_id}:{video_file_name}")
-    valid_sha256 = video_sha256 if len(video_sha256) == 64 else hash_seed
+    
+    probe_source_video = None
+    probe_timebase = None
+    if video_path and os.path.exists(video_path):
+        try:
+            real_sha256 = compute_sha256(video_path)
+            probe_res = probe_media(video_path)
+            probe_source_video = probe_res.to_source_video_dict(video_file_name, real_sha256)
+            probe_timebase = probe_res.to_timebase_dict()
+            valid_sha256 = real_sha256
+        except (MediaProbeError, OSError, ValueError):
+            valid_sha256 = video_sha256 if len(video_sha256) == 64 else hash_seed
+    else:
+        valid_sha256 = video_sha256 if len(video_sha256) == 64 else hash_seed
     
     # Ensure canonical UUID strings for blueprint_id and job_id
     try:
@@ -23,49 +45,53 @@ def run_deterministic_mock_pipeline(job_id: str, video_file_name: str, video_sha
         
     blueprint_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"blueprint:{valid_job_id}"))
     
+    source_video = probe_source_video or {
+        "file_name": video_file_name,
+        "mime_type": "video/mp4",
+        "container": "mov,mp4,m4a,3gp,3g2,mj2",
+        "file_size_bytes": 10485760,
+        "sha256": valid_sha256,
+        "duration_us": 6000000,
+        "width": 1920,
+        "height": 1080,
+        "display_aspect_ratio": "16:9",
+        "pixel_aspect_ratio": "1:1",
+        "rotation_deg": 0,
+        "video_codec": "h264",
+        "pixel_format": "yuv420p",
+        "bit_depth": 8,
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "color_space": "bt709",
+        "fps_avg": 30.0,
+        "fps_nominal": 30.0,
+        "variable_frame_rate": False,
+        "source_frame_count": 180,
+        "has_audio": False,
+        "audio_codec": None,
+        "audio_sample_rate_hz": None,
+        "audio_channels": None,
+        "metadata_stripped": True
+    }
+
+    timebase = probe_timebase or {
+        "normalized_to_cfr": True,
+        "fps_num": 30,
+        "fps_den": 1,
+        "frame_count": 180,
+        "frame_duration_us": 33333.333,
+        "start_pts_us": 0,
+        "end_pts_us": 5966667,
+        "source_pts_map_ref": None
+    }
+
     # 1. Blueprint Manifest matching canonical schema
     blueprint: dict[str, Any] = {
         "schema_version": "1.0.0",
         "blueprint_id": blueprint_uuid,
         "created_at": "2026-08-12T00:00:00Z",
-        "source_video": {
-            "file_name": video_file_name,
-            "mime_type": "video/mp4",
-            "container": "mov,mp4,m4a,3gp,3g2,mj2",
-            "file_size_bytes": 10485760,
-            "sha256": valid_sha256,
-            "duration_us": 6000000,
-            "width": 1920,
-            "height": 1080,
-            "display_aspect_ratio": "16:9",
-            "pixel_aspect_ratio": "1:1",
-            "rotation_deg": 0,
-            "video_codec": "h264",
-            "pixel_format": "yuv420p",
-            "bit_depth": 8,
-            "color_primaries": "bt709",
-            "color_transfer": "bt709",
-            "color_space": "bt709",
-            "fps_avg": 30.0,
-            "fps_nominal": 30.0,
-            "variable_frame_rate": False,
-            "source_frame_count": 180,
-            "has_audio": False,
-            "audio_codec": None,
-            "audio_sample_rate_hz": None,
-            "audio_channels": None,
-            "metadata_stripped": True
-        },
-        "timebase": {
-            "normalized_to_cfr": True,
-            "fps_num": 30,
-            "fps_den": 1,
-            "frame_count": 180,
-            "frame_duration_us": 33333.333,
-            "start_pts_us": 0,
-            "end_pts_us": 5966667,
-            "source_pts_map_ref": None
-        },
+        "source_video": source_video,
+        "timebase": timebase,
         "processing": {
             "job_id": valid_job_id,
             "status": "succeeded",

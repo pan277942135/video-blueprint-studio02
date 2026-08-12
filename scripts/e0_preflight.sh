@@ -5,6 +5,11 @@ echo "=================================================="
 echo "      Video Blueprint Studio - Epic E0 Preflight   "
 echo "=================================================="
 
+# 0. Check System Dependencies
+echo -e "\n[0/5] Checking System Dependencies (ffmpeg/ffprobe)..."
+which ffprobe >/dev/null 2>&1 || (echo "ERROR: ffprobe is not installed!" && exit 1)
+which ffmpeg >/dev/null 2>&1 || (echo "ERROR: ffmpeg is not installed!" && exit 1)
+
 # 1. Contract Validation
 echo -e "\n[1/5] Executing Contract Validation Script..."
 python3 scripts/validate_contracts.py
