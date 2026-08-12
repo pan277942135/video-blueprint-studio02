@@ -321,22 +321,23 @@ def probe_media(video_path: str) -> MediaProbeResult:
         video_path
     ]
 
-    frames_data: list[dict[str, Any]] = []
     try:
         res_frames = subprocess.run(cmd_frames, capture_output=True, check=True, text=True)
-        frames_data = json.loads(res_frames.stdout).get("frames", [])
-    except (subprocess.CalledProcessError, json.JSONDecodeError):
-        pass
+        frames_data: list[dict[str, Any]] = json.loads(res_frames.stdout).get("frames", [])
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
+        raise TimingIndeterminateError(f"Frame-level ffprobe inspection failed for {video_path}") from e
 
-    # Source frame count priority: nb_frames -> len(frames_data) -> None
+    if not frames_data:
+        raise TimingIndeterminateError(f"No frame data returned from ffprobe inspection for {video_path}")
+
+    # Source frame count priority: nb_frames -> len(frames_data)
     source_frame_count: int | None = None
     if "nb_frames" in vstream and str(vstream["nb_frames"]).isdigit() and int(vstream["nb_frames"]) > 0:
         source_frame_count = int(vstream["nb_frames"])
-    elif len(frames_data) > 0:
+    else:
         source_frame_count = len(frames_data)
 
     # Conservative VFR detection
-    vfr = False
     frame_timestamps: list[float] = []
     for f in frames_data:
         ts_val = f.get("best_effort_timestamp_time") or f.get("pkt_pts_time")
@@ -346,25 +347,22 @@ def probe_media(video_path: str) -> MediaProbeResult:
             except ValueError:
                 pass
 
-    if len(frame_timestamps) >= 2:
-        deltas = [frame_timestamps[i + 1] - frame_timestamps[i] for i in range(len(frame_timestamps) - 1)]
-        if any(d <= 0 for d in deltas):
-            raise TimingIndeterminateError(f"Non-positive or non-monotonic frame delta encountered in {video_path}")
+    if len(frame_timestamps) < 2:
+        raise TimingIndeterminateError(
+            f"Insufficient frame timestamps ({len(frame_timestamps)}) for reliable timing inspection in {video_path}"
+        )
 
-        max_delta = max(deltas)
-        min_delta = min(deltas)
-        # If delta variation > 2ms or fraction divergence > 0.05
-        if (max_delta - min_delta) > 0.002 or (fps_avg_calc and fps_r_calc and abs(fps_avg_calc - fps_r_calc) > 0.05):
-            vfr = True
-        else:
-            vfr = False
-    elif fps_avg_calc and fps_r_calc:
-        if abs(fps_avg_calc - fps_r_calc) > 0.05:
-            vfr = True
-        else:
-            vfr = False
+    deltas = [frame_timestamps[i + 1] - frame_timestamps[i] for i in range(len(frame_timestamps) - 1)]
+    if any(d <= 0 for d in deltas):
+        raise TimingIndeterminateError(f"Non-positive or non-monotonic frame delta encountered in {video_path}")
+
+    max_delta = max(deltas)
+    min_delta = min(deltas)
+    # If delta variation > 2ms or fraction divergence > 0.05
+    if (max_delta - min_delta) > 0.002 or (fps_avg_calc and fps_r_calc and abs(fps_avg_calc - fps_r_calc) > 0.05):
+        vfr = True
     else:
-        raise TimingIndeterminateError(f"Frame timing and frame rate cannot be reliably determined for {video_path}")
+        vfr = False
 
     # Optional metadata fields
     pixel_format = vstream.get("pix_fmt")

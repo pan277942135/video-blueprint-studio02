@@ -9,6 +9,7 @@ from packages.pipeline_core.media_probe import (
     InvalidMediaError,
     MediaProbeResult,
     NoVideoStreamError,
+    TimingIndeterminateError,
     compute_sha256,
     probe_media,
 )
@@ -233,3 +234,37 @@ def test_canonical_schema_mapping_validity(sample_cfr_video):
 
     is_valid, errors = validator.validate(blueprint)
     assert is_valid, f"Mapped media probe output failed schema validation: {errors}"
+
+
+def test_frame_level_inspection_failure_raises_timing_indeterminate(sample_cfr_video, monkeypatch):
+    """Verifies that if frame-level ffprobe fails or yields no frame timestamps, probe_media raises TimingIndeterminateError."""
+    orig_run = subprocess.run
+
+    def mock_run(cmd, *args, **kwargs):
+        if "-show_entries" in cmd and "frame=pkt_pts,pkt_pts_time,best_effort_timestamp_time,pkt_duration_time" in cmd:
+            raise subprocess.CalledProcessError(1, cmd, stderr="Mocked frame ffprobe failure")
+        return orig_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    with pytest.raises(TimingIndeterminateError):
+        probe_media(sample_cfr_video)
+
+
+def test_no_available_frame_timestamps_raises_timing_indeterminate(sample_cfr_video, monkeypatch):
+    """Verifies that if frame-level ffprobe returns empty frame timestamps, probe_media raises TimingIndeterminateError."""
+    orig_run = subprocess.run
+
+    def mock_run(cmd, *args, **kwargs):
+        if "-show_entries" in cmd and "frame=pkt_pts,pkt_pts_time,best_effort_timestamp_time,pkt_duration_time" in cmd:
+            class MockCompletedProcess:
+                stdout = '{"frames": []}'
+                stderr = ""
+            return MockCompletedProcess()
+        return orig_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    with pytest.raises(TimingIndeterminateError):
+        probe_media(sample_cfr_video)
+
