@@ -5,20 +5,24 @@ echo "=================================================="
 echo "      Video Blueprint Studio - Epic E0 Preflight   "
 echo "=================================================="
 
-# 1. Verify Python & Dependencies
-echo -e "\n[1/4] Checking Python Environment..."
-python3 --version
-
-# 2. Run Contract Validation Script
-echo -e "\n[2/4] Executing Contract Validation Script..."
+# 1. Contract Validation
+echo -e "\n[1/5] Executing Contract Validation Script..."
 python3 scripts/validate_contracts.py
 
-# 3. Run Pytest Suite
-echo -e "\n[3/4] Running Pytest Test Suite..."
+# 2. Pytest Suite
+echo -e "\n[2/5] Running Pytest Test Suite..."
 python3 -m pytest tests/ -v
 
-# 4. Check Engineering Invariants
-echo -e "\n[4/4] Verifying Epic E0 Invariants..."
+# 3. Ruff Lint Check
+echo -e "\n[3/5] Running Ruff Linter..."
+ruff check .
+
+# 4. Mypy Type Check
+echo -e "\n[4/5] Running Mypy Type Checker..."
+mypy apps packages
+
+# 5. Check Engineering Invariants
+echo -e "\n[5/5] Verifying Epic E0 Invariants..."
 echo "[✔] Manifest + Sidecar separation enforced."
 echo "[✔] Zero biometric identity embeddings."
 echo "[✔] Deterministic mock pipeline verified."

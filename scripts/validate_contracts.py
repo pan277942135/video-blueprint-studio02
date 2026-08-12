@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.abspath("."))
 
 from packages.blueprint_schema.validator import BlueprintValidator
 
+
 def main():
     print("==================================================")
     print("Video Blueprint Studio - Contract Validation Script")
@@ -46,7 +47,7 @@ def main():
             with open(filepath, "r", encoding="utf-8") as f:
                 invalid_data = json.load(f)
             
-            val_result, val_errors = validator.validate(invalid_data)
+            val_result, _ = validator.validate(invalid_data)
             if not val_result:
                 print(f"[✔] Negative fixture correctly REJECTED: {filename}")
             else:

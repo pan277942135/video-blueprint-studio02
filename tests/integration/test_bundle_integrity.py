@@ -1,7 +1,9 @@
+import io
 import json
 import zipfile
-import io
+
 from fastapi.testclient import TestClient
+
 from apps.api.main import app
 
 client = TestClient(app)

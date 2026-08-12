@@ -1,22 +1,84 @@
-# Video Blueprint Studio — Gemini Project Pack v0.1
+# Video Blueprint Studio — Milestone 1 (Epic E0)
 
-This package prepares the Video Blueprint Studio project for **Gemini Code Assist / Gemini CLI / browser-first Google Cloud development**.
+Video Blueprint Studio M1 is an offline-first video analysis and verifiable-blueprint system.
+The system converts authorized source videos into structured, reproducible **Video Blueprint bundles** preserving timing, camera motion, anonymous character motion, pose, landmarks, masks, surface residual motion, micro-motion, quality, and provenance.
 
-The pack intentionally stops before real computer-vision integration. The first engineering objective is **Epic E0: contract + engineering skeleton**.
+> **Status Notice**: The project is currently in **Epic E0: Contract & Engineering Skeleton ONLY**. No real CV/AI models (e.g. RTMDet, RTMW, SAM 2, MediaPipe) or identity replacement models are integrated in E0.
 
-## Start here
+---
 
-1. Read `START_HERE.md`.
-2. Keep `GEMINI.md` at the repository root.
-3. Use the prompt in `AI_STUDIO_START_PROMPT.md` if working from Google AI Studio or another Gemini chat surface.
-4. If using Gemini CLI, use the included project commands:
-   - `/vbs:e0`
-   - `/vbs:validate`
-   - `/vbs:status`
-5. Do not begin E1 until E0 passes the acceptance checklist in `docs/epic-plan.md`.
+## 🚀 Epic E0 Runbook
 
-## Important
+### Prerequisites
+- **Python**: 3.11+
+- **Docker** & **Docker Compose** (optional for containerized setup)
 
-`contracts/video_blueprint.schema.json` is the canonical protocol source.
+### 1. Installation & Environment Setup
+Clone the repository and install the project in editable mode with development dependencies:
 
-The repository currently contains **project instructions and starter contracts**, not a completed E0 application. Gemini should implement E0 inside this repository.
+```bash
+python3 -m pip install -e .[dev]
+```
+
+### 2. Local API Server Execution
+Start the FastAPI server locally:
+
+```bash
+uvicorn apps.api.main:app --reload --port 8000
+```
+API Documentation will be available at `http://localhost:8000/docs`.
+
+### 3. Running Verification & Quality Checks
+
+#### Contract Validation Script
+Validate positive and negative blueprint JSON fixtures against `contracts/video_blueprint.schema.json`:
+
+```bash
+python3 scripts/validate_contracts.py
+```
+
+#### Integration & Contract Tests
+Run the test suite with pytest:
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+#### Code Linting (Ruff)
+Run Ruff linter:
+
+```bash
+ruff check .
+```
+
+#### Type Checking (Mypy)
+Run Mypy static type checker across API and packages:
+
+```bash
+mypy apps packages
+```
+
+#### One-Step E0 Preflight Verification
+Execute the master E0 preflight script which runs all contract, test, lint, and type checks:
+
+```bash
+bash scripts/e0_preflight.sh
+```
+
+---
+
+## 🐳 Docker Setup
+
+Build and run the API service via Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+---
+
+## 📜 Canonical Protocols
+
+1. `contracts/video_blueprint.schema.json` — Canonical protocol source (Draft 2020-12 JSON Schema).
+2. `contracts/openapi.yaml` — Canonical REST API specification.
+3. `contracts/example_blueprint.json` — Canonical example fixture.

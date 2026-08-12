@@ -1,7 +1,8 @@
 import json
 import os
-import pytest
+
 from packages.blueprint_schema.validator import BlueprintValidator, load_canonical_schema
+
 
 def test_canonical_schema_loading():
     schema = load_canonical_schema()

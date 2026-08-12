@@ -1,5 +1,7 @@
 import uuid
+
 from fastapi.testclient import TestClient
+
 from apps.api.main import app
 
 client = TestClient(app)
@@ -91,5 +93,31 @@ def test_upload_and_canonical_analysis_flow():
     # 10. Low-cost stubs
     assert client.get(f"/api/v1/analyses/{analysis_id}/artifacts").status_code == 200
     assert client.patch(f"/api/v1/analyses/{analysis_id}/annotations", json={"operations": []}).status_code == 200
-    assert client.get(f"/api/v1/analyses/{analysis_id}/events").status_code == 200
+
+def test_invalid_uuid_inputs():
+    # Invalid video_id in body -> HTTP 422
+    resp_body = client.post("/api/v1/analyses", json={"video_id": "invalid-uuid-string"})
+    assert resp_body.status_code == 422
+
+    # Invalid analysis_id in path -> HTTP 422
+    resp_path1 = client.get("/api/v1/analyses/invalid-uuid-string")
+    assert resp_path1.status_code == 422
+
+    resp_path2 = client.post("/api/v1/analyses/invalid-uuid-string/cancel")
+    assert resp_path2.status_code == 422
+
+    resp_path3 = client.get("/api/v1/analyses/invalid-uuid-string/events")
+    assert resp_path3.status_code == 422
+
+def test_sse_events_stream():
+    valid_vid = str(uuid.uuid4())
+    create_resp = client.post("/api/v1/analyses", json={"video_id": valid_vid})
+    assert create_resp.status_code == 202
+    analysis_id = create_resp.json()["analysis_id"]
+
+    events_resp = client.get(f"/api/v1/analyses/{analysis_id}/events")
+    assert events_resp.status_code == 200
+    assert "text/event-stream" in events_resp.headers["content-type"]
+    assert "event: status" in events_resp.text
+    assert "data: {" in events_resp.text
 

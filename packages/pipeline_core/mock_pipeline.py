@@ -1,11 +1,12 @@
 import hashlib
 import uuid
-from typing import Dict, Any, Tuple
+from typing import Any
+
 
 def generate_deterministic_hash(seed: str) -> str:
     return hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
-def run_deterministic_mock_pipeline(job_id: str, video_file_name: str, video_sha256: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def run_deterministic_mock_pipeline(job_id: str, video_file_name: str, video_sha256: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     Deterministic Mock Pipeline for Epic E0.
     Produces a canonical, schema-valid Blueprint manifest matching contracts/video_blueprint.schema.json.
@@ -23,7 +24,7 @@ def run_deterministic_mock_pipeline(job_id: str, video_file_name: str, video_sha
     blueprint_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"blueprint:{valid_job_id}"))
     
     # 1. Blueprint Manifest matching canonical schema
-    blueprint = {
+    blueprint: dict[str, Any] = {
         "schema_version": "1.0.0",
         "blueprint_id": blueprint_uuid,
         "created_at": "2026-08-12T00:00:00Z",

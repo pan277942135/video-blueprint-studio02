@@ -1,6 +1,9 @@
 from enum import Enum
-from typing import Dict, Any, List, Optional
+from typing import Any
+from uuid import UUID
+
 from pydantic import BaseModel, Field
+
 
 class JobStatus(str, Enum):
     QUEUED = "queued"
@@ -11,46 +14,46 @@ class JobStatus(str, Enum):
     PARTIAL = "partial"
 
 class VideoRecord(BaseModel):
-    video_id: str
+    video_id: UUID
     file_name: str
     sha256: str
     status: str = "uploaded"
 
 class CreateAnalysisRequest(BaseModel):
-    video_id: str
-    modules: Optional[List[str]] = Field(
+    video_id: UUID
+    modules: list[str] | None = Field(
         default_factory=lambda: [
             "shots", "people", "pose", "face", "hands",
             "masks", "camera", "flow", "micro_motion", "environment", "overlays"
         ]
     )
-    config_overrides: Optional[Dict[str, Any]] = None
+    config_overrides: dict[str, Any] | None = None
 
 class RetryAnalysisRequest(BaseModel):
-    stages: Optional[List[str]] = None
+    stages: list[str] | None = None
     invalidate_downstream: bool = True
 
 class ErrorDetail(BaseModel):
     code: str
     message: str
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
 class AnalysisJob(BaseModel):
-    analysis_id: str
-    video_id: str
+    analysis_id: UUID
+    video_id: UUID
     status: JobStatus
     progress: float = 0.0
-    stages: List[Dict[str, Any]] = Field(default_factory=list)
-    error: Optional[ErrorDetail] = None
+    stages: list[dict[str, Any]] = Field(default_factory=list)
+    error: ErrorDetail | None = None
 
 class ValidationReport(BaseModel):
     valid: bool
     schema_version: str = "Draft 2020-12"
     validated_at: str
-    errors: List[str] = Field(default_factory=list)
-    summary: Dict[str, Any] = Field(default_factory=dict)
+    errors: list[str] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
 
 class PatchOperation(BaseModel):
     op: str # add, replace, remove
     path: str
-    value: Optional[Any] = None
+    value: Any | None = None

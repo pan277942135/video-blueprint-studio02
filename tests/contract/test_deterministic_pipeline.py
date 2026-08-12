@@ -1,6 +1,8 @@
 import json
-from packages.pipeline_core.mock_pipeline import run_deterministic_mock_pipeline
+
 from packages.blueprint_schema.validator import BlueprintValidator
+from packages.pipeline_core.mock_pipeline import run_deterministic_mock_pipeline
+
 
 def test_mock_pipeline_determinism():
     job_id = "test_job_12345"

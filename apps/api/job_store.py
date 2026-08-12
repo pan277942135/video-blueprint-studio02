@@ -1,6 +1,6 @@
-import datetime
-from typing import Dict, Any, Optional, List
 import uuid
+from typing import Any
+
 
 class InMemoryJobStore:
     """
@@ -8,13 +8,13 @@ class InMemoryJobStore:
     No external database dependencies (Postgres/Redis) for E0.
     """
     def __init__(self):
-        self.videos: Dict[str, Dict[str, Any]] = {}
-        self.jobs: Dict[str, Dict[str, Any]] = {}
-        self.blueprints: Dict[str, Dict[str, Any]] = {}
-        self.sidecars: Dict[str, Dict[str, Any]] = {}
-        self.bundle_paths: Dict[str, str] = {}
+        self.videos: dict[str, dict[str, Any]] = {}
+        self.jobs: dict[str, dict[str, Any]] = {}
+        self.blueprints: dict[str, dict[str, Any]] = {}
+        self.sidecars: dict[str, dict[str, Any]] = {}
+        self.bundle_paths: dict[str, str] = {}
 
-    def store_video(self, file_name: str, sha256_hash: str, custom_video_id: Optional[str] = None) -> Dict[str, Any]:
+    def store_video(self, file_name: str, sha256_hash: str, custom_video_id: str | None = None) -> dict[str, Any]:
         video_id = custom_video_id or str(uuid.uuid4())
         video_record = {
             "video_id": video_id,
@@ -25,7 +25,7 @@ class InMemoryJobStore:
         self.videos[video_id] = video_record
         return video_record
 
-    def create_analysis(self, video_id: str, modules: Optional[List[str]] = None, config_overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def create_analysis(self, video_id: str, modules: list[str] | None = None, config_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         analysis_id = str(uuid.uuid4())
         job_record = {
             "analysis_id": analysis_id,
@@ -49,10 +49,10 @@ class InMemoryJobStore:
         self.jobs[analysis_id] = job_record
         return job_record
 
-    def get_analysis(self, analysis_id: str) -> Optional[Dict[str, Any]]:
+    def get_analysis(self, analysis_id: str) -> dict[str, Any] | None:
         return self.jobs.get(analysis_id)
 
-    def update_analysis(self, analysis_id: str, **kwargs) -> Dict[str, Any]:
+    def update_analysis(self, analysis_id: str, **kwargs) -> dict[str, Any]:
         job = self.jobs.get(analysis_id)
         if not job:
             raise KeyError(f"Analysis {analysis_id} not found.")
@@ -60,17 +60,17 @@ class InMemoryJobStore:
             job[k] = v
         return job
 
-    def store_blueprint(self, analysis_id: str, blueprint_data: Dict[str, Any], sidecars_data: Dict[str, Any]):
+    def store_blueprint(self, analysis_id: str, blueprint_data: dict[str, Any], sidecars_data: dict[str, Any]):
         self.blueprints[analysis_id] = blueprint_data
         self.sidecars[analysis_id] = sidecars_data
 
-    def get_blueprint(self, analysis_id: str) -> Optional[Dict[str, Any]]:
+    def get_blueprint(self, analysis_id: str) -> dict[str, Any] | None:
         return self.blueprints.get(analysis_id)
 
     def store_bundle_path(self, analysis_id: str, path: str):
         self.bundle_paths[analysis_id] = path
 
-    def get_bundle_path(self, analysis_id: str) -> Optional[str]:
+    def get_bundle_path(self, analysis_id: str) -> str | None:
         return self.bundle_paths.get(analysis_id)
 
 job_store = InMemoryJobStore()

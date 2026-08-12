@@ -1,15 +1,16 @@
+import hashlib
 import json
 import zipfile
-import hashlib
-from typing import Dict, Any, List
+from typing import Any
+
 
 def calculate_sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 def create_bundle_zip(
-    blueprint_data: Dict[str, Any],
-    sidecars: Dict[str, Any],
-    validation_report: Dict[str, Any],
+    blueprint_data: dict[str, Any],
+    sidecars: dict[str, Any],
+    validation_report: dict[str, Any],
     output_zip_path: str
 ) -> str:
     """
@@ -20,7 +21,7 @@ def create_bundle_zip(
       - validation_report.json
       - sidecars/*
     """
-    bundle_manifest_files: List[Dict[str, Any]] = []
+    bundle_manifest_files: list[dict[str, Any]] = []
 
     with zipfile.ZipFile(output_zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
         # 1. Write blueprint.json

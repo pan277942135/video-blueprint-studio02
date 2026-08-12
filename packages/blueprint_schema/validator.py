@@ -1,11 +1,12 @@
 import json
 import os
-from typing import Dict, Any, List, Tuple
+from typing import Any
+
 import jsonschema
 
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "../../contracts/video_blueprint.schema.json")
 
-def load_canonical_schema() -> Dict[str, Any]:
+def load_canonical_schema() -> dict[str, Any]:
     resolved_path = os.path.abspath(SCHEMA_PATH)
     if not os.path.exists(resolved_path):
         # Fallback to root contracts directory
@@ -14,19 +15,19 @@ def load_canonical_schema() -> Dict[str, Any]:
         return json.load(f)
 
 class BlueprintValidator:
-    def __init__(self, schema: Dict[str, Any] = None):
+    def __init__(self, schema: dict[str, Any] | None = None):
         if schema is None:
             schema = load_canonical_schema()
         self.schema = schema
         self.format_checker = jsonschema.FormatChecker()
         self.validator = jsonschema.Draft202012Validator(schema, format_checker=self.format_checker)
 
-    def validate(self, blueprint_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    def validate(self, blueprint_data: dict[str, Any]) -> tuple[bool, list[str]]:
         """
         Validates blueprint JSON against Draft 2020-12 schema and E0 engineering invariants.
         Returns (is_valid, list_of_error_messages).
         """
-        errors: List[str] = []
+        errors: list[str] = []
 
         # 1. Draft 2020-12 JSON Schema Validation
         schema_errors = sorted(self.validator.iter_errors(blueprint_data), key=lambda e: e.path)
