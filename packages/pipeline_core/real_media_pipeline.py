@@ -44,12 +44,13 @@ def run_real_media_pipeline(
 
     timebase = blueprint["timebase"]
     config = ShotDetectionConfig()
+    artifact_root = os.path.join(os.path.dirname(video_path), f"vbs_artifacts_{job_id}")
     shots, shot_sidecars = detect_shots(
         str(normalized_path),
         frame_count=int(timebase["frame_count"]),
         fps_num=int(timebase["fps_num"]),
         fps_den=int(timebase["fps_den"]),
-        output_dir=os.path.dirname(video_path),
+        output_dir=artifact_root,
         config=config,
     )
     sidecars.update(shot_sidecars)
