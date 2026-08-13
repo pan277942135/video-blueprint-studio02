@@ -11,4 +11,5 @@ data/
 artifacts/
 models/
 *.zip
+ffmpeg-*-static/
 .DS_Store
