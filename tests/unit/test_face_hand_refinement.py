@@ -179,7 +179,7 @@ def test_refinement_emits_frame_aligned_geometry_without_interpolation(three_fra
 
 def test_completely_absent_face_and_hands_emit_disabled_null_refs(three_frame_video, tmp_path):
     character, sidecars = _tracking_character(tmp_path)
-    characters, _, _ = run_face_hand_refinement(
+    characters, refinement_sidecars, report_ref = run_face_hand_refinement(
         str(three_frame_video),
         characters=[character],
         frame_count=3,
@@ -199,6 +199,9 @@ def test_completely_absent_face_and_hands_emit_disabled_null_refs(three_frame_vi
         assert result["hands"][side]["bbox_ref"] is None
         assert result["hands"][side]["landmarks_2d_ref"] is None
         assert result["hands"][side]["handedness_ref"] is None
+
+    assert "artifacts/timeseries/char_000_face_hands.npz" not in refinement_sidecars
+    assert set(refinement_sidecars) == {report_ref["uri"]}
 
 
 def test_refinement_rejects_wrong_face_landmark_shape(three_frame_video, tmp_path):
