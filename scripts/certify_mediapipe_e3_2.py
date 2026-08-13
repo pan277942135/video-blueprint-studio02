@@ -32,9 +32,9 @@ def _video_shape(path: str) -> tuple[int, int, int, float]:
     capture = cv2.VideoCapture(path)
     if not capture.isOpened():
         raise RuntimeError(f"Could not open certification video: {path}")
-    frame_count = int(round(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
-    width = int(round(capture.get(cv2.CAP_PROP_FRAME_WIDTH)))
-    height = int(round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    frame_count = round(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = float(capture.get(cv2.CAP_PROP_FPS))
     capture.release()
     if frame_count <= 0 or width <= 0 or height <= 0 or not np.isfinite(fps) or fps <= 0.0:
@@ -81,7 +81,7 @@ def certify(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError(f"Hand task hash mismatch: {hand_sha256}")
 
     frame_count, width, height, fps = _video_shape(args.video)
-    fps_num = int(round(fps * 1000))
+    fps_num = round(fps * 1000)
     fps_den = 1000
     divisor = int(np.gcd(fps_num, fps_den))
     fps_num //= divisor
@@ -157,7 +157,7 @@ def certify(args: argparse.Namespace) -> dict[str, Any]:
 
         report = refinement_sidecars.get(report_ref["uri"])
         if not isinstance(report, dict):
-            raise RuntimeError("Face/hands refinement report missing")
+            raise TypeError("Face/hands refinement report missing")
         if report.get("identity_inference_performed") is not False:
             raise RuntimeError("Certification report violated identity-inference invariant")
         if report.get("biometric_embedding_exported") is not False:
