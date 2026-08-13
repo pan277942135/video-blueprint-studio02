@@ -2,8 +2,8 @@ import hashlib
 import io
 import json
 import os
-import subprocess
 import shutil
+import subprocess
 import tempfile
 import zipfile
 
@@ -125,9 +125,8 @@ def test_zip_bundle_integrity():
             # Ensure no local absolute paths leaked into ZIP artifact payloads
             for name in namelist:
                 content = zf.read(name)
-                if name.endswith(".mp4") or name.endswith(".npz"):
+                if name.endswith((".mp4", ".npz")):
                     assert not content.startswith(b"/app/")
                     assert not content.startswith(b"/tmp/")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
-
