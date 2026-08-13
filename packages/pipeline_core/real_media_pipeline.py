@@ -310,7 +310,7 @@ def run_real_media_pipeline(
         pose_estimator,
         face_hand_refiner,
     )
-    blueprint["processing"]["pipeline_version"] = "0.3.0-e3.2"
+    blueprint["processing"]["pipeline_version"] = "0.3.0-e3.2" if face_hands_enabled else "0.3.0-e3.1"
     blueprint["processing"]["config_hash"] = combined_config_hash
     blueprint["processing"]["stages"] = [
         {
