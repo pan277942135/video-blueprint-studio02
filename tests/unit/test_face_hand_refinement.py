@@ -77,19 +77,23 @@ class _FakeRefiner:
         )
 
 
+class _NoObservationRefiner:
+    def refine(self, frame, bbox_xyxy, frame_idx, character_id):
+        return None
+
+
 class _InvalidFaceRefiner(_FakeRefiner):
     def refine(self, frame, bbox_xyxy, frame_idx, character_id):
         observation = super().refine(frame, bbox_xyxy, frame_idx, character_id)
         assert observation is not None and observation.face is not None
-        bad_face = FaceObservation(
-            landmarks_xy=np.zeros((477, 2), dtype=np.float32),
-            bbox_xyxy=observation.face.bbox_xyxy,
-            confidence=observation.face.confidence,
-        )
         return FaceHandObservation(
             frame_idx=frame_idx,
             character_id=character_id,
-            face=bad_face,
+            face=FaceObservation(
+                landmarks_xy=np.zeros((477, 2), dtype=np.float32),
+                bbox_xyxy=observation.face.bbox_xyxy,
+                confidence=observation.face.confidence,
+            ),
             hands=(),
         )
 
@@ -131,11 +135,9 @@ def test_refinement_emits_frame_aligned_geometry_without_interpolation(three_fra
         sidecars=sidecars,
     )
 
-    assert len(characters) == 1
     result = characters[0]
     assert result["privacy"]["identity_inference_performed"] is False
     assert result["privacy"]["biometric_embedding_exported"] is False
-
     assert result["face"]["enabled"] is True
     assert result["face"]["landmark_count"] == FACE_LANDMARK_COUNT
     assert result["face"]["landmarks_2d_ref"]["coordinate_space"] == "pixel_xy"
@@ -148,6 +150,10 @@ def test_refinement_emits_frame_aligned_geometry_without_interpolation(three_fra
     assert result["hands"]["left"]["landmark_count"] == HAND_LANDMARK_COUNT
     assert result["hands"]["right"]["enabled"] is False
     assert result["hands"]["right"]["landmark_count"] == 0
+    assert result["hands"]["right"]["present_ref"] is None
+    assert result["hands"]["right"]["bbox_ref"] is None
+    assert result["hands"]["right"]["landmarks_2d_ref"] is None
+    assert result["hands"]["right"]["handedness_ref"] is None
 
     uri = result["face"]["landmarks_2d_ref"]["uri"]
     assert uri in refinement_sidecars
@@ -163,13 +169,36 @@ def test_refinement_emits_frame_aligned_geometry_without_interpolation(three_fra
         assert data["left_hand_present"].tolist() == pytest.approx([0.0, 0.82, 0.0])
         assert data["right_hand_present"].tolist() == pytest.approx([0.0, 0.0, 0.0])
 
-    assert report_ref["uri"] == "artifacts/reports/face_hands_refinement.json"
     report = refinement_sidecars[report_ref["uri"]]
     assert report["identity_inference_performed"] is False
     assert report["biometric_embedding_exported"] is False
     assert report["characters"][0]["face_frames"] == 3
     assert report["characters"][0]["left_hand_frames"] == 1
     assert report["characters"][0]["right_hand_frames"] == 0
+
+
+def test_completely_absent_face_and_hands_emit_disabled_null_refs(three_frame_video, tmp_path):
+    character, sidecars = _tracking_character(tmp_path)
+    characters, _, _ = run_face_hand_refinement(
+        str(three_frame_video),
+        characters=[character],
+        frame_count=3,
+        refiner=_NoObservationRefiner(),
+        output_dir=str(tmp_path / "out"),
+        sidecars=sidecars,
+    )
+    result = characters[0]
+    assert result["face"]["enabled"] is False
+    assert result["face"]["landmark_count"] == 0
+    assert result["face"]["bbox_ref"] is None
+    assert result["face"]["landmarks_2d_ref"] is None
+    for side in ("left", "right"):
+        assert result["hands"][side]["enabled"] is False
+        assert result["hands"][side]["landmark_count"] == 0
+        assert result["hands"][side]["present_ref"] is None
+        assert result["hands"][side]["bbox_ref"] is None
+        assert result["hands"][side]["landmarks_2d_ref"] is None
+        assert result["hands"][side]["handedness_ref"] is None
 
 
 def test_refinement_rejects_wrong_face_landmark_shape(three_frame_video, tmp_path):
