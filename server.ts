@@ -10,7 +10,6 @@ import { createServer as createViteServer } from 'vite';
 import { VideoRecord, AnalysisJob, AnnotationOp } from './src/types.js';
 import { createDefaultStages, generateDeterministicBlueprint, ALL_E0_MODULES } from './src/mockPipeline.js';
 import { validateBlueprintObject } from './src/schemaValidator.js';
-import { generateBundleZipBuffer } from './src/bundleGenerator.js';
 
 const app = express();
 const PORT = 3000;
@@ -18,7 +17,6 @@ const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 
-// In-memory databases for E0 mock service
 const videosStore = new Map<string, VideoRecord>();
 const jobsStore = new Map<string, AnalysisJob>();
 const blueprintsStore = new Map<string, any>();
@@ -26,13 +24,13 @@ const bundlePathsStore = new Map<string, string>();
 const validationReportsStore = new Map<string, any>();
 const sseClients = new Map<string, express.Response[]>();
 
-// Configure multer for video upload
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit for E0
+  limits: { fileSize: 100 * 1024 * 1024 },
 });
 
-// Seed default sample video & job for instant testing out of the box
+// E0 demo fixture is retained only for explicit sample/demo inspection.
+// Real uploaded analyses must never fall back to this fixture or its metadata.
 const sampleVideoId = '00000000-0000-4000-8000-000000000010';
 const sampleJobId = '00000000-0000-4000-8000-000000000002';
 
@@ -68,7 +66,6 @@ const sampleJob: AnalysisJob = {
 jobsStore.set(sampleJobId, sampleJob);
 blueprintsStore.set(sampleJobId, generateDeterministicBlueprint(sampleJob, sampleVideo));
 
-// Helper: Notify SSE Clients
 function notifySseClients(analysisId: string, jobData: AnalysisJob) {
   const clients = sseClients.get(analysisId) || [];
   clients.forEach((res) => {
@@ -76,80 +73,102 @@ function notifySseClients(analysisId: string, jobData: AnalysisJob) {
   });
 }
 
-// Background simulator to advance job progress step-by-step
-function runMockAnalysisPipelineAsync(jobId: string) {
+function failJob(job: AnalysisJob, code: string, message: string) {
+  job.status = 'failed';
+  job.progress = 0;
+  job.completed_at = new Date().toISOString();
+  job.error = { code, message };
+  job.stages = job.stages.map((stage) => ({
+    ...stage,
+    status: 'failed',
+    progress: 0,
+    completed_at: new Date().toISOString(),
+    error_message: message,
+  }));
+  notifySseClients(job.analysis_id, job);
+}
+
+// E1 real-media runtime. This path is deliberately fail-closed: no E0/demo
+// blueprint or bundle is generated if probing, normalization, validation, or
+// export fails.
+function runRealAnalysisPipelineAsync(jobId: string) {
   const job = jobsStore.get(jobId);
   if (!job) return;
 
+  const video = videosStore.get(job.video_id);
+  if (!video || !video.file_path || !fs.existsSync(video.file_path)) {
+    failJob(job, 'REAL_MEDIA_REQUIRED', 'Persisted uploaded video file is required for real-media analysis.');
+    return;
+  }
+
   job.status = 'running';
+  job.progress = 0.05;
   job.started_at = new Date().toISOString();
+  job.error = undefined;
+  job.stages = createDefaultStages();
+  if (job.stages.length > 0) {
+    job.stages[0].status = 'running';
+    job.stages[0].started_at = new Date().toISOString();
+  }
   notifySseClients(jobId, job);
 
-  let currentStageIndex = 0;
-  const interval = setInterval(() => {
-    const currentJob = jobsStore.get(jobId);
-    if (!currentJob || currentJob.status === 'cancelled' || currentJob.status === 'failed') {
-      clearInterval(interval);
+  try {
+    const runOutput = execFileSync('python3', [
+      'scripts/run_pipeline_job.py',
+      jobId,
+      video.file_path,
+      video.file_name,
+      video.sha256,
+    ], { encoding: 'utf-8' });
+
+    const runRes = JSON.parse(runOutput);
+    if (
+      runRes.status !== 'succeeded' ||
+      runRes.valid !== true ||
+      !runRes.blueprint_path ||
+      !fs.existsSync(runRes.blueprint_path) ||
+      !runRes.bundle_path ||
+      !fs.existsSync(runRes.bundle_path) ||
+      !runRes.validation_report_path ||
+      !fs.existsSync(runRes.validation_report_path)
+    ) {
+      const detail = runRes.error || (Array.isArray(runRes.errors) ? runRes.errors.join('; ') : 'Real-media pipeline did not return complete validated outputs.');
+      failJob(job, 'REAL_MEDIA_PIPELINE_FAILED', detail);
       return;
     }
 
-    if (currentStageIndex < currentJob.stages.length) {
-      const stage = currentJob.stages[currentStageIndex];
-      stage.status = 'running';
-      stage.progress = 1.0;
-      stage.started_at = new Date().toISOString();
-      stage.completed_at = new Date().toISOString();
-      stage.status = 'succeeded';
-
-      currentStageIndex++;
-      currentJob.progress = Number((currentStageIndex / currentJob.stages.length).toFixed(2));
-      notifySseClients(jobId, currentJob);
-    } else {
-      clearInterval(interval);
-      currentJob.status = 'succeeded';
-      currentJob.progress = 1.0;
-      currentJob.completed_at = new Date().toISOString();
-
-      const video = videosStore.get(currentJob.video_id);
-      if (video) {
-        try {
-          const runOutput = execFileSync('python3', [
-            'scripts/run_pipeline_job.py',
-            jobId,
-            video.file_path || '',
-            video.file_name,
-            video.sha256
-          ], { encoding: 'utf-8' });
-
-          const runRes = JSON.parse(runOutput);
-          if (runRes.status === 'succeeded' && runRes.blueprint_path && fs.existsSync(runRes.blueprint_path)) {
-            const bpData = JSON.parse(fs.readFileSync(runRes.blueprint_path, 'utf-8'));
-            blueprintsStore.set(jobId, bpData);
-            if (runRes.bundle_path) {
-              bundlePathsStore.set(jobId, runRes.bundle_path);
-            }
-            if (runRes.validation_report_path && fs.existsSync(runRes.validation_report_path)) {
-              validationReportsStore.set(jobId, JSON.parse(fs.readFileSync(runRes.validation_report_path, 'utf-8')));
-            }
-          } else {
-            const bp = generateDeterministicBlueprint(currentJob, video);
-            blueprintsStore.set(jobId, bp);
-          }
-        } catch (err) {
-          console.error('Python pipeline execution error:', err);
-          const bp = generateDeterministicBlueprint(currentJob, video);
-          blueprintsStore.set(jobId, bp);
-        }
-      }
-
-      notifySseClients(jobId, currentJob);
+    const bpData = JSON.parse(fs.readFileSync(runRes.blueprint_path, 'utf-8'));
+    const reportData = JSON.parse(fs.readFileSync(runRes.validation_report_path, 'utf-8'));
+    if (reportData.valid !== true) {
+      failJob(job, 'BUNDLE_VALIDATION_FAILED', 'Real-media blueprint validation failed.');
+      return;
     }
-  }, 600);
+
+    blueprintsStore.set(jobId, bpData);
+    bundlePathsStore.set(jobId, runRes.bundle_path);
+    validationReportsStore.set(jobId, reportData);
+
+    job.status = 'succeeded';
+    job.progress = 1.0;
+    job.completed_at = new Date().toISOString();
+    job.stages = createDefaultStages().map((stage) => ({
+      ...stage,
+      status: 'succeeded',
+      progress: 1.0,
+      started_at: job.started_at,
+      completed_at: job.completed_at,
+    }));
+    notifySseClients(jobId, job);
+  } catch (err: any) {
+    console.error('Real-media Python pipeline execution error:', err);
+    const stderr = typeof err?.stderr === 'string' ? err.stderr.trim() : '';
+    const stdout = typeof err?.stdout === 'string' ? err.stdout.trim() : '';
+    failJob(job, 'REAL_MEDIA_PIPELINE_FAILED', stderr || stdout || err?.message || 'Unknown real-media pipeline error');
+  }
 }
 
 // --- API ENDPOINTS ---
 
-// POST /api/v1/videos
 app.post('/api/v1/videos', upload.single('file'), (req: express.Request, res: express.Response) => {
   const authAttested = req.body.authorization_attested === 'true' || req.body.authorization_attested === true;
   const adultAttested = req.body.adult_subject_attested === 'true' || req.body.adult_subject_attested === true;
@@ -162,36 +181,52 @@ app.post('/api/v1/videos', upload.single('file'), (req: express.Request, res: ex
   }
 
   const file = req.file;
-  const fileName = file ? file.originalname : req.body.file_name || 'source_video.mp4';
-  const videoId = uuidv4();
-  let tempFilePath = '';
-
-  if (file) {
-    tempFilePath = path.join(os.tmpdir(), `vbs_upload_${videoId}_${fileName}`);
-    fs.writeFileSync(tempFilePath, file.buffer);
+  if (!file) {
+    return res.status(400).json({
+      code: 'VIDEO_FILE_REQUIRED',
+      message: 'A real uploaded video file is required.',
+    });
   }
 
-  let probedData: any = {};
-  if (tempFilePath && fs.existsSync(tempFilePath)) {
-    try {
-      const probeOutput = execFileSync('python3', ['scripts/probe_video.py', tempFilePath], { encoding: 'utf-8' });
-      probedData = JSON.parse(probeOutput);
-    } catch (err) {
-      console.error('Python video probe execution error:', err);
-    }
+  const fileName = file.originalname || 'source_video.mp4';
+  const videoId = uuidv4();
+  const tempFilePath = path.join(os.tmpdir(), `vbs_upload_${videoId}_${fileName}`);
+  fs.writeFileSync(tempFilePath, file.buffer);
+
+  let probedData: any;
+  try {
+    const probeOutput = execFileSync('python3', ['scripts/probe_video.py', tempFilePath], { encoding: 'utf-8' });
+    probedData = JSON.parse(probeOutput);
+  } catch (err: any) {
+    console.error('Python video probe execution error:', err);
+    try { fs.unlinkSync(tempFilePath); } catch { /* best effort cleanup */ }
+    return res.status(422).json({
+      code: 'MEDIA_PROBE_FAILED',
+      message: typeof err?.stderr === 'string' && err.stderr.trim() ? err.stderr.trim() : 'Uploaded video could not be probed.',
+    });
+  }
+
+  const requiredProbeFields = ['sha256', 'file_size_bytes', 'duration_us', 'width', 'height', 'fps_avg'];
+  const missingProbeFields = requiredProbeFields.filter((field) => probedData?.[field] === undefined || probedData?.[field] === null);
+  if (missingProbeFields.length > 0) {
+    try { fs.unlinkSync(tempFilePath); } catch { /* best effort cleanup */ }
+    return res.status(422).json({
+      code: 'MEDIA_PROBE_INCOMPLETE',
+      message: `Probe output missing required fields: ${missingProbeFields.join(', ')}`,
+    });
   }
 
   const record: VideoRecord = {
     video_id: videoId,
     file_name: fileName,
-    sha256: probedData.sha256 || (file ? 'mock_sha256_' + uuidv4().slice(0, 8) : 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'),
+    sha256: probedData.sha256,
     status: 'validated',
-    mime_type: probedData.mime_type || (file ? file.mimetype : 'video/mp4'),
-    file_size_bytes: probedData.file_size_bytes || (file ? file.size : 15420000),
-    duration_us: probedData.duration_us || 10000000,
-    width: probedData.width || 1920,
-    height: probedData.height || 1080,
-    fps_avg: probedData.fps_avg || 30.0,
+    mime_type: probedData.mime_type || file.mimetype || 'video/mp4',
+    file_size_bytes: probedData.file_size_bytes,
+    duration_us: probedData.duration_us,
+    width: probedData.width,
+    height: probedData.height,
+    fps_avg: probedData.fps_avg,
     created_at: new Date().toISOString(),
     authorization_attested: true,
     adult_subject_attested: true,
@@ -202,18 +237,24 @@ app.post('/api/v1/videos', upload.single('file'), (req: express.Request, res: ex
   return res.status(201).json(record);
 });
 
-// GET /api/v1/videos
 app.get('/api/v1/videos', (req, res) => {
   res.json(Array.from(videosStore.values()));
 });
 
-// POST /api/v1/analyses
 app.post('/api/v1/analyses', (req, res) => {
   const { video_id, modules, config_overrides } = req.body;
   if (!video_id || !videosStore.has(video_id)) {
     return res.status(400).json({
       code: 'INVALID_VIDEO_ID',
       message: 'Specified video_id does not exist.',
+    });
+  }
+
+  const video = videosStore.get(video_id)!;
+  if (!video.file_path || !fs.existsSync(video.file_path)) {
+    return res.status(400).json({
+      code: 'REAL_MEDIA_REQUIRED',
+      message: 'Analysis requires a persisted video uploaded through /api/v1/videos.',
     });
   }
 
@@ -230,19 +271,15 @@ app.post('/api/v1/analyses', (req, res) => {
   };
 
   jobsStore.set(analysisId, job);
-
-  // Trigger deterministic async execution
-  setTimeout(() => runMockAnalysisPipelineAsync(analysisId), 300);
+  setTimeout(() => runRealAnalysisPipelineAsync(analysisId), 50);
 
   return res.status(202).json(job);
 });
 
-// GET /api/v1/analyses
 app.get('/api/v1/analyses', (req, res) => {
   res.json(Array.from(jobsStore.values()));
 });
 
-// GET /api/v1/analyses/:analysis_id
 app.get('/api/v1/analyses/:analysis_id', (req, res) => {
   const job = jobsStore.get(req.params.analysis_id);
   if (!job) {
@@ -251,7 +288,6 @@ app.get('/api/v1/analyses/:analysis_id', (req, res) => {
   return res.json(job);
 });
 
-// POST /api/v1/analyses/:analysis_id/cancel
 app.post('/api/v1/analyses/:analysis_id/cancel', (req, res) => {
   const job = jobsStore.get(req.params.analysis_id);
   if (!job) {
@@ -263,11 +299,18 @@ app.post('/api/v1/analyses/:analysis_id/cancel', (req, res) => {
   return res.status(202).json({ status: 'cancellation_requested', analysis_id: job.analysis_id });
 });
 
-// POST /api/v1/analyses/:analysis_id/retry
 app.post('/api/v1/analyses/:analysis_id/retry', (req, res) => {
   const job = jobsStore.get(req.params.analysis_id);
   if (!job) {
     return res.status(404).json({ code: 'NOT_FOUND', message: 'Analysis job not found.' });
+  }
+
+  const video = videosStore.get(job.video_id);
+  if (!video || !video.file_path || !fs.existsSync(video.file_path)) {
+    return res.status(400).json({
+      code: 'REAL_MEDIA_REQUIRED',
+      message: 'Retry requires the original persisted uploaded video.',
+    });
   }
 
   job.status = 'queued';
@@ -276,66 +319,46 @@ app.post('/api/v1/analyses/:analysis_id/retry', (req, res) => {
   job.error = undefined;
   notifySseClients(req.params.analysis_id, job);
 
-  setTimeout(() => runMockAnalysisPipelineAsync(job.analysis_id), 300);
+  setTimeout(() => runRealAnalysisPipelineAsync(job.analysis_id), 50);
   return res.status(202).json({ status: 'retry_queued', analysis_id: job.analysis_id });
 });
 
-// GET /api/v1/analyses/:analysis_id/blueprint
 app.get('/api/v1/analyses/:analysis_id/blueprint', (req, res) => {
   const jobId = req.params.analysis_id;
-  const bp = blueprintsStore.get(jobId);
+  const job = jobsStore.get(jobId);
+  if (!job) {
+    return res.status(404).json({ code: 'NOT_FOUND', message: 'Analysis job not found.' });
+  }
+  if (job.status === 'failed') {
+    return res.status(409).json({ code: job.error?.code || 'ANALYSIS_FAILED', message: job.error?.message || 'Analysis failed.' });
+  }
 
+  const bp = blueprintsStore.get(jobId);
   if (!bp) {
-    const job = jobsStore.get(jobId);
-    if (job) {
-      const video = videosStore.get(job.video_id);
-      if (video) {
-        const generatedBp = generateDeterministicBlueprint(job, video);
-        blueprintsStore.set(jobId, generatedBp);
-        return res.json(generatedBp);
-      }
-    }
     return res.status(404).json({ code: 'NOT_FOUND', message: 'Blueprint not yet generated for this job.' });
   }
 
   return res.json(bp);
 });
 
-// GET /api/v1/analyses/:analysis_id/bundle
-app.get('/api/v1/analyses/:analysis_id/bundle', async (req, res) => {
+app.get('/api/v1/analyses/:analysis_id/bundle', (req, res) => {
   const jobId = req.params.analysis_id;
+  const job = jobsStore.get(jobId);
+  if (!job) {
+    return res.status(404).json({ code: 'NOT_FOUND', message: 'Analysis job not found.' });
+  }
+  if (job.status === 'failed') {
+    return res.status(409).json({ code: job.error?.code || 'ANALYSIS_FAILED', message: job.error?.message || 'Analysis failed.' });
+  }
 
   const bundlePath = bundlePathsStore.get(jobId);
-  if (bundlePath && fs.existsSync(bundlePath)) {
-    return res.download(bundlePath, `bundle_${jobId.slice(0, 8)}.zip`);
+  if (!bundlePath || !fs.existsSync(bundlePath)) {
+    return res.status(404).json({ code: 'NOT_FOUND', message: 'Validated real-media bundle not yet generated for this job.' });
   }
 
-  let bp = blueprintsStore.get(jobId);
-
-  if (!bp) {
-    const job = jobsStore.get(jobId);
-    if (job) {
-      const video = videosStore.get(job.video_id);
-      if (video) {
-        bp = generateDeterministicBlueprint(job, video);
-        blueprintsStore.set(jobId, bp);
-      }
-    }
-  }
-
-  if (!bp) {
-    return res.status(404).json({ code: 'NOT_FOUND', message: 'Blueprint not found to generate bundle.' });
-  }
-
-  const report = validateBlueprintObject(bp);
-  const zipBuffer = await generateBundleZipBuffer(bp, report);
-
-  res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', `attachment; filename="bundle_${jobId.slice(0, 8)}.zip"`);
-  return res.send(zipBuffer);
+  return res.download(bundlePath, `bundle_${jobId.slice(0, 8)}.zip`);
 });
 
-// GET /api/v1/analyses/:analysis_id/artifacts
 app.get('/api/v1/analyses/:analysis_id/artifacts', (req, res) => {
   const jobId = req.params.analysis_id;
   const bp = blueprintsStore.get(jobId);
@@ -353,7 +376,6 @@ app.get('/api/v1/analyses/:analysis_id/artifacts', (req, res) => {
   });
 });
 
-// PATCH /api/v1/analyses/:analysis_id/annotations
 app.patch('/api/v1/analyses/:analysis_id/annotations', (req, res) => {
   const jobId = req.params.analysis_id;
   const job = jobsStore.get(jobId);
@@ -386,28 +408,22 @@ app.patch('/api/v1/analyses/:analysis_id/annotations', (req, res) => {
   });
 });
 
-// POST /api/v1/analyses/:analysis_id/validate
 app.post('/api/v1/analyses/:analysis_id/validate', (req, res) => {
   const jobId = req.params.analysis_id;
+  const job = jobsStore.get(jobId);
+  if (!job) {
+    return res.status(404).json({ code: 'NOT_FOUND', message: 'Analysis job not found.' });
+  }
+  if (job.status === 'failed') {
+    return res.status(409).json({ code: job.error?.code || 'ANALYSIS_FAILED', message: job.error?.message || 'Analysis failed.' });
+  }
 
   const existingReport = validationReportsStore.get(jobId);
   if (existingReport) {
     return res.json(existingReport);
   }
 
-  let bp = blueprintsStore.get(jobId);
-
-  if (!bp) {
-    const job = jobsStore.get(jobId);
-    if (job) {
-      const video = videosStore.get(job.video_id);
-      if (video) {
-        bp = generateDeterministicBlueprint(job, video);
-        blueprintsStore.set(jobId, bp);
-      }
-    }
-  }
-
+  const bp = blueprintsStore.get(jobId);
   if (!bp) {
     return res.status(404).json({ code: 'NOT_FOUND', message: 'Blueprint not found.' });
   }
@@ -416,7 +432,6 @@ app.post('/api/v1/analyses/:analysis_id/validate', (req, res) => {
   return res.json(report);
 });
 
-// GET /api/v1/analyses/:analysis_id/events
 app.get('/api/v1/analyses/:analysis_id/events', (req, res) => {
   const jobId = req.params.analysis_id;
 
@@ -444,7 +459,6 @@ app.get('/api/v1/analyses/:analysis_id/events', (req, res) => {
   });
 });
 
-// Helper POST /api/v1/test/run-contract-tests
 app.post('/api/v1/test/run-contract-tests', (req, res) => {
   try {
     const examplePath = path.join(process.cwd(), 'contracts', 'example_blueprint.json');
@@ -463,7 +477,6 @@ app.post('/api/v1/test/run-contract-tests', (req, res) => {
   }
 });
 
-// JSON 404 handler for unmatched API routes
 app.use('/api', (req: express.Request, res: express.Response) => {
   return res.status(404).json({
     code: 'NOT_FOUND',
@@ -471,7 +484,6 @@ app.use('/api', (req: express.Request, res: express.Response) => {
   });
 });
 
-// Mount Vite middleware in development or static serve in production
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
