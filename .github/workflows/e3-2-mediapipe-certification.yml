@@ -85,7 +85,7 @@ jobs:
 
       - name: Run real E3.2 MediaPipe VIDEO-mode certification
         run: |
-          python scripts/certify_mediapipe_e3_2.py \
+          PYTHONPATH=. python scripts/certify_mediapipe_e3_2.py \
             --video .cert/face_hand_smoke.mp4 \
             --face-task .cert/face_landmarker.task \
             --hand-task .cert/hand_landmarker.task \
