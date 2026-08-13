@@ -2,9 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies required by the API and optional E3.2 MediaPipe runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libgles2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements & install dependencies
