@@ -231,7 +231,7 @@ def probe_stream_durations_us(file_path: str) -> tuple[int, int | None]:
             "-show_entries", "frame=pkt_pts_time,pkt_duration_time",
             "-select_streams", "v:0", file_path
         ]
-        res_v = subprocess.run(cmd_v, capture_output=True, text=True)
+        res_v = subprocess.run(cmd_v, capture_output=True, check=False, text=True)
         if res_v.returncode == 0:
             v_frames = json.loads(res_v.stdout).get("frames", [])
             if v_frames:
@@ -246,7 +246,7 @@ def probe_stream_durations_us(file_path: str) -> tuple[int, int | None]:
             "-show_entries", "packet=pts_time,duration_time",
             "-select_streams", "a:0", file_path
         ]
-        res_a = subprocess.run(cmd_a, capture_output=True, text=True)
+        res_a = subprocess.run(cmd_a, capture_output=True, check=False, text=True)
         if res_a.returncode == 0:
             a_pkts = json.loads(res_a.stdout).get("packets", [])
             if a_pkts:
@@ -309,11 +309,30 @@ def validate_normalization(
             f"but source_pts_map has {pts_map_matrix.shape[0]} rows"
         )
 
-    target_fps_float = target_fps_num / target_fps_den
-    if abs(norm_probe.fps_avg - target_fps_float) > 0.5:
-        raise NormalizationValidationError(
-            f"Normalized video FPS {norm_probe.fps_avg:.3f} diverges from target {target_fps_float:.3f}"
-        )
+    target_frac = Fraction(target_fps_num, target_fps_den)
+    actual_frac = None
+    for fr_str in (norm_probe.r_frame_rate, norm_probe.avg_frame_rate):
+        if fr_str and "/" in fr_str:
+            try:
+                n_s, d_s = fr_str.split("/")
+                n_v, d_v = int(n_s), int(d_s)
+                if d_v > 0 and n_v > 0:
+                    actual_frac = Fraction(n_v, d_v)
+                    break
+            except ValueError:
+                pass
+
+    if actual_frac is not None:
+        if actual_frac != target_frac:
+            raise NormalizationValidationError(
+                f"Normalized video rational FPS {actual_frac} does not match target {target_frac}"
+            )
+    else:
+        target_fps_float = float(target_frac)
+        if abs(norm_probe.fps_avg - target_fps_float) > 1e-4:
+            raise NormalizationValidationError(
+                f"Normalized video FPS {norm_probe.fps_avg:.5f} diverges from target {target_fps_float:.5f}"
+            )
 
     video_dur_us, audio_dur_us = probe_stream_durations_us(normalized_video_path)
 
@@ -368,27 +387,16 @@ def normalize_media_to_cfr(
     fps_num, fps_den = determine_target_fps(probe_result, analysis_fps_max)
     fps_float = fps_num / fps_den
 
-    cfr_flag = ["-fps_mode", "cfr"]
-    ff_bin = shutil.which("ffmpeg") or "ffmpeg"
-    try:
-        h_res = subprocess.run([ff_bin, "-h"], capture_output=True, text=True)
-        if "-fps_mode" not in h_res.stdout and "-fps_mode" not in h_res.stderr:
-            cfr_flag = ["-vsync", "cfr"]
-    except Exception:
-        pass
-
     cmd = [
         "ffmpeg", "-y",
         "-i", video_path,
-        "-vf", f"setpts=PTS-STARTPTS,fps={fps_num}/{fps_den}:round=near"
-    ]
-    cmd.extend(cfr_flag)
-    cmd.extend([
+        "-vf", f"setpts=PTS-STARTPTS,fps={fps_num}/{fps_den}:round=near",
+        "-fps_mode", "cfr",
         "-c:v", video_codec,
         "-preset", preset,
         "-crf", str(crf),
         "-pix_fmt", "yuv420p"
-    ])
+    ]
     if probe_result.has_audio:
         cmd.extend([
             "-af", "asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0",
@@ -462,4 +470,3 @@ def normalize_media_to_cfr(
         mapping_error_max_us=max_err_us,
         mapping_error_mean_us=mean_err_us
     )
-
