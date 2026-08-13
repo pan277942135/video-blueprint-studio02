@@ -10,7 +10,6 @@ SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "../../contracts/video_blu
 def load_canonical_schema() -> dict[str, Any]:
     resolved_path = os.path.abspath(SCHEMA_PATH)
     if not os.path.exists(resolved_path):
-        # Fallback to root contracts directory
         resolved_path = os.path.abspath("contracts/video_blueprint.schema.json")
     with open(resolved_path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -23,12 +22,6 @@ def _validate_face_2d_ref(
     frame_count: Any,
     path: str,
 ) -> list[str]:
-    """Validate E3.2 image-plane face landmark semantics beyond JSON types.
-
-    TimeSeriesRef intentionally supports multiple coordinate spaces for other
-    modules.  A Face.landmarks_2d_ref is narrower: it must be pixel XY, dense
-    per-frame geometry, with explicit NaN preservation and no interpolation.
-    """
     if ref is None:
         return []
     if not isinstance(ref, dict):
@@ -76,6 +69,76 @@ def _validate_face_2d_ref(
     return errors
 
 
+def _validate_person_mask_ref(
+    ref: Any,
+    *,
+    frame_count: Any,
+    height: Any,
+    width: Any,
+    path: str,
+) -> list[str]:
+    if ref is None:
+        return []
+    if not isinstance(ref, dict):
+        return [f"E4.1 Person Mask Contract Violation: {path} must be a TimeSeriesRef or null."]
+
+    errors: list[str] = []
+    expected = {
+        "format": "rle_json",
+        "dtype": "bool",
+        "axes": ["frame", "y", "x"],
+        "unit": "binary",
+        "coordinate_space": "pixel_xy",
+        "sampling": "per_frame",
+        "nan_policy": "preserve",
+        "interpolation_policy": "none",
+    }
+    for key, value in expected.items():
+        if ref.get(key) != value:
+            errors.append(
+                f"E4.1 Person Mask Contract Violation: {path}.{key} must equal {value!r}."
+            )
+
+    shape = ref.get("shape")
+    if not isinstance(shape, list) or len(shape) != 3:
+        errors.append(
+            f"E4.1 Person Mask Contract Violation: {path}.shape must be [frame_count, height, width]."
+        )
+    else:
+        expected_shape = [frame_count, height, width]
+        if all(isinstance(value, int) for value in expected_shape) and shape != expected_shape:
+            errors.append(
+                f"E4.1 Person Mask Contract Violation: {path}.shape {shape} must equal {expected_shape}."
+            )
+
+    if isinstance(frame_count, int) and frame_count > 0:
+        if ref.get("frame_start") != 0:
+            errors.append(f"E4.1 Person Mask Contract Violation: {path}.frame_start must be 0.")
+        if ref.get("frame_end") != frame_count - 1:
+            errors.append(
+                f"E4.1 Person Mask Contract Violation: {path}.frame_end must equal frame_count - 1."
+            )
+
+    metadata = ref.get("metadata")
+    if not isinstance(metadata, dict):
+        errors.append(f"E4.1 Person Mask Contract Violation: {path}.metadata is required.")
+    else:
+        if metadata.get("encoding") != "row_major_binary_rle_v1":
+            errors.append(
+                f"E4.1 Person Mask Contract Violation: {path}.metadata.encoding must be "
+                "'row_major_binary_rle_v1'."
+            )
+        if metadata.get("foreground_value") != 1 or metadata.get("background_value") != 0:
+            errors.append(
+                f"E4.1 Person Mask Contract Violation: {path} must declare foreground=1/background=0."
+            )
+        if "missing_frame_value" not in metadata or metadata.get("missing_frame_value") is not None:
+            errors.append(
+                f"E4.1 Person Mask Contract Violation: {path}.metadata.missing_frame_value must be null."
+            )
+    return errors
+
+
 class BlueprintValidator:
     def __init__(self, schema: dict[str, Any] | None = None):
         if schema is None:
@@ -85,20 +148,13 @@ class BlueprintValidator:
         self.validator = jsonschema.Draft202012Validator(schema, format_checker=self.format_checker)
 
     def validate(self, blueprint_data: dict[str, Any]) -> tuple[bool, list[str]]:
-        """
-        Validates blueprint JSON against Draft 2020-12 schema and engineering invariants.
-        Returns (is_valid, list_of_error_messages).
-        """
         errors: list[str] = []
 
-        # 1. Draft 2020-12 JSON Schema Validation
         schema_errors = sorted(self.validator.iter_errors(blueprint_data), key=lambda e: e.path)
         for err in schema_errors:
             path_str = ".".join(str(p) for p in err.path) if err.path else "root"
             errors.append(f"Schema Error at '{path_str}': {err.message}")
 
-        # 2. Engineering Invariant 1: Manifest + Sidecar Separation
-        # Dense arrays must NOT be embedded directly in blueprint.json
         forbidden_dense_keys = [
             "dense_motion_vectors",
             "embedded_landmarks",
@@ -112,7 +168,6 @@ class BlueprintValidator:
                     "(Manifest + Sidecar required)."
                 )
 
-        # 3. Engineering Invariant 2: Biometric & Identity Protection
         forbidden_identity_keys = [
             "biometric_embedding",
             "facial_identity_vectors",
@@ -127,7 +182,6 @@ class BlueprintValidator:
                     "and demographic inferences are not allowed."
                 )
 
-        # 4. Engineering Invariant 3: CFR Timebase
         timebase = blueprint_data.get("timebase")
         if isinstance(timebase, dict):
             fps_num = timebase.get("fps_num")
@@ -137,7 +191,6 @@ class BlueprintValidator:
             if fps_den is not None and fps_den <= 0:
                 errors.append("Invariant Violation: timebase.fps_den must be a positive integer.")
 
-        # 5. Cross-Reference Validation: Character IDs
         characters = blueprint_data.get("characters", [])
         declared_char_ids = {
             c.get("character_id")
@@ -158,7 +211,6 @@ class BlueprintValidator:
                                     "in characters[]."
                                 )
 
-        # 6. Timeline Bounds Validation
         frame_count: Any = None
         if isinstance(timebase, dict):
             frame_count = timebase.get("frame_count")
@@ -177,23 +229,32 @@ class BlueprintValidator:
                                             f"total frame_count ({frame_count})."
                                         )
 
-        # 7. E3.2 Face 2D landmark semantic contract
         if isinstance(characters, list):
+            source_video = blueprint_data.get("source_video")
+            height = source_video.get("height") if isinstance(source_video, dict) else None
+            width = source_video.get("width") if isinstance(source_video, dict) else None
             for index, character in enumerate(characters):
                 if not isinstance(character, dict):
                     continue
                 face = character.get("face")
-                if not isinstance(face, dict):
-                    continue
-                if "landmarks_2d_ref" not in face:
-                    continue
-                errors.extend(
-                    _validate_face_2d_ref(
-                        face.get("landmarks_2d_ref"),
-                        landmark_count=face.get("landmark_count"),
-                        frame_count=frame_count,
-                        path=f"characters[{index}].face.landmarks_2d_ref",
+                if isinstance(face, dict) and "landmarks_2d_ref" in face:
+                    errors.extend(
+                        _validate_face_2d_ref(
+                            face.get("landmarks_2d_ref"),
+                            landmark_count=face.get("landmark_count"),
+                            frame_count=frame_count,
+                            path=f"characters[{index}].face.landmarks_2d_ref",
+                        )
                     )
-                )
+                if "person_mask_ref" in character:
+                    errors.extend(
+                        _validate_person_mask_ref(
+                            character.get("person_mask_ref"),
+                            frame_count=frame_count,
+                            height=height,
+                            width=width,
+                            path=f"characters[{index}].person_mask_ref",
+                        )
+                    )
 
         return (len(errors) == 0, errors)
