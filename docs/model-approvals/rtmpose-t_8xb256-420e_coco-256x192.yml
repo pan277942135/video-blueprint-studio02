@@ -1,0 +1,29 @@
+model: rtmpose-t_8xb256-420e_coco-256x192
+approval:
+  status: approved
+  approved_by: project_user
+  approved_at: "2026-08-13"
+  scope: "E3.1 anonymous COCO-17 2D body pose certification/runtime"
+upstream:
+  repository: "https://github.com/open-mmlab/mmpose"
+  model_index: "configs/body_2d_keypoint/rtmpose/coco/rtmpose_coco.yml"
+  config: "configs/body_2d_keypoint/rtmpose/coco/rtmpose-t_8xb256-420e_coco-256x192.py"
+  weights_url: "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmpose-tiny_simcc-coco_pt-aic-coco_420e-256x192-e613ba3f_20230127.pth"
+integrity:
+  publisher_filename_sha256_prefix: "e613ba3f"
+  verified_sha256: null
+  verification_status: "pending_full_sha256_certification"
+certification:
+  status: pending
+  workflow_run_id: null
+  pipeline_version: null
+  character_count: null
+  pose_character_count: null
+  max_pose_coverage: null
+  max_mean_nonzero_confidence: null
+license_record:
+  runtime_code: "MMPose Apache-2.0"
+  checkpoint_note: "Official OpenMMLab model-zoo checkpoint explicitly approved by the project user for this project; exact downloaded SHA256 must be recorded before runtime certification is final."
+privacy:
+  identity_inference_performed: false
+  biometric_embedding_exported: false
