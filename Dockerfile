@@ -5,7 +5,9 @@ WORKDIR /app
 # Install system dependencies required by the API and optional E3.2 MediaPipe runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libegl1 \
     libgles2 \
+    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements & install dependencies
