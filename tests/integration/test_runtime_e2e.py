@@ -29,10 +29,14 @@ def real_video_file():
     cmd = [
         ffmpeg,
         "-y",
-        "-f", "lavfi",
-        "-i", "testsrc=duration=8:size=360x640:rate=30",
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=duration=8:size=360x640:rate=30",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
         video_path,
     ]
     subprocess.run(cmd, check=True, capture_output=True)
@@ -111,10 +115,12 @@ def test_runtime_e2e_real_media_pipeline(real_video_file):
             assert "bundle_manifest.json" in file_list
             assert "validation_report.json" in file_list
             assert "artifacts/timeseries/source_pts_map.npz" in file_list
+            assert "artifacts/reports/shot_detection.json" in file_list
             assert "sidecars/pts_map.json" not in file_list
 
             bp = json.loads(z.read("blueprint.json").decode("utf-8"))
             validation_report = json.loads(z.read("validation_report.json").decode("utf-8"))
+            shot_report = json.loads(z.read("artifacts/reports/shot_detection.json").decode("utf-8"))
 
             timebase = bp["timebase"]
             source_vid = bp["source_video"]
@@ -125,6 +131,28 @@ def test_runtime_e2e_real_media_pipeline(real_video_file):
             assert source_vid["sha256"] == expected_sha256
             assert source_vid["sha256"] != MOCK_SHA256_TEST
             assert validation_report["valid"] is True
+
+            shots = bp["shots"]
+            assert shots
+            assert shots[0]["frame_start"] == 0
+            assert shots[-1]["frame_end"] == 239
+            expected_next_start = 0
+            referenced_keyframes: set[str] = set()
+            for shot in shots:
+                assert shot["frame_start"] == expected_next_start
+                expected_next_start = shot["frame_end"] + 1
+                assert shot["keyframes"]
+                for keyframe in shot["keyframes"]:
+                    uri = keyframe["image_uri"]
+                    referenced_keyframes.add(uri)
+                    assert uri in file_list
+                    assert uri.startswith("artifacts/keyframes/")
+                    assert uri.endswith(".png")
+            assert expected_next_start == 240
+            assert referenced_keyframes
+            assert shot_report["shot_count"] == len(shots)
+            assert shot_report["frame_count"] == 240
+            assert shot_report["backend"] == "pyscenedetect_content_detector"
 
             z.extract("artifacts/timeseries/source_pts_map.npz", path=extract_dir)
             npz_path = os.path.join(extract_dir, "artifacts", "timeseries", "source_pts_map.npz")
