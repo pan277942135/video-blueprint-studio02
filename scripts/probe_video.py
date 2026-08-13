@@ -1,11 +1,12 @@
-import sys
-import os
 import json
+import os
+import sys
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from packages.pipeline_core.media_probe import probe_media, compute_sha256
+from packages.pipeline_core.media_probe import compute_sha256, probe_media
+
 
 def main():
     if len(sys.argv) < 2:
@@ -29,12 +30,13 @@ def main():
             "width": probe_res.width,
             "height": probe_res.height,
             "fps_avg": probe_res.fps_avg,
-            "start_pts_us": probe_res.start_pts_us
+            "start_pts_us": probe_res.start_pts_us,
         }
         print(json.dumps(data))
-    except Exception as e:  # noqa: BLE001  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         print(json.dumps({"error": str(e)}))
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
