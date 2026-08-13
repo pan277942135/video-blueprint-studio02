@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 from __future__ import annotations
 
 import hashlib
@@ -235,7 +236,7 @@ class MediaPipeFaceHandRefiner:
         self.face_task_sha256 = face_sha256
         self.hand_task_sha256 = hand_sha256
         self.config_sha256 = _config_hash(config, face_sha256, hand_sha256)
-        self.weights_sha256 = hashlib.sha256(f"{face_sha256}:{hand_sha256}".encode("utf-8")).hexdigest()
+        self.weights_sha256 = hashlib.sha256(f"{face_sha256}:{hand_sha256}".encode()).hexdigest()
         self._mp = mediapipe_module
         self._states: dict[str, _CharacterTasks] = {}
 
@@ -295,7 +296,7 @@ class MediaPipeFaceHandRefiner:
         )
 
     def _timestamp_ms(self, frame_idx: int, state: _CharacterTasks) -> int:
-        timestamp = int(round(frame_idx * 1000.0 * self.config.fps_den / self.config.fps_num))
+        timestamp = round(frame_idx * 1000.0 * self.config.fps_den / self.config.fps_num)
         if timestamp <= state.last_timestamp_ms:
             timestamp = state.last_timestamp_ms + 1
         state.last_timestamp_ms = timestamp
@@ -403,7 +404,7 @@ class MediaPipeFaceHandRefiner:
             for task in (state.face_landmarker, state.hand_landmarker):
                 try:
                     task.close()
-                except Exception as exc:  # pragma: no cover - defensive cleanup path
+                except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive cleanup path
                     errors.append(exc)
         if errors:
             raise MediaPipeFaceHandConfigurationError(f"MediaPipe E3.2 task cleanup failed: {errors[0]}")
