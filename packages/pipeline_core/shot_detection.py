@@ -30,7 +30,7 @@ def _sha256_file(path: str) -> str:
 
 
 def _time_us(frame_idx: int, fps_num: int, fps_den: int) -> int:
-    return int(round(frame_idx * 1_000_000 * fps_den / fps_num))
+    return round(frame_idx * 1_000_000 * fps_den / fps_num)
 
 
 def _sharpness_score(frame: Any) -> float:
