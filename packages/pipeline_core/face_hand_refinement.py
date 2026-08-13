@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 from __future__ import annotations
 
 import hashlib
@@ -62,8 +63,7 @@ def _sha256_file(path: str) -> str:
 
 
 def _json_sha256(value: Any) -> str:
-    payload = json.dumps(value, indent=2).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+    return hashlib.sha256(json.dumps(value, indent=2).encode("utf-8")).hexdigest()
 
 
 def _timeseries_ref(
@@ -114,7 +114,6 @@ def _load_character_bboxes(
     path = sidecars.get(uri)
     if not isinstance(path, (str, os.PathLike)) or not os.path.isfile(str(path)):
         raise FaceHandRefinementError(f"Character {character_id} bbox sidecar is unavailable: {uri}")
-
     with np.load(str(path), allow_pickle=False) as bundle:
         if array_key not in bundle:
             raise FaceHandRefinementError(f"Character {character_id} bbox array is missing: {array_key}")
@@ -140,12 +139,7 @@ def _validate_bbox(
     return x1, y1, x2, y2
 
 
-def _validate_landmarks(
-    landmarks: np.ndarray,
-    *,
-    count: int,
-    label: str,
-) -> np.ndarray:
+def _validate_landmarks(landmarks: np.ndarray, *, count: int, label: str) -> np.ndarray:
     xy = np.asarray(landmarks, dtype=np.float32)
     if xy.shape != (count, 2):
         raise FaceHandRefinementError(f"{label} landmarks must have shape ({count}, 2), got {xy.shape}")
@@ -156,7 +150,7 @@ def _validate_landmarks(
 
 def _validate_confidence(value: float, *, label: str) -> float:
     confidence = float(value)
-    if not np.isfinite(confidence) or confidence < 0.0 or confidence > 1.0:
+    if not np.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
         raise FaceHandRefinementError(f"{label} confidence must be finite and within [0, 1]")
     return confidence
 
@@ -231,6 +225,194 @@ def _quality(*, estimated: int, present: int, confidences: list[float], module: 
     }
 
 
+def _disabled_quality(module: str) -> dict[str, Any]:
+    return {
+        "score": 0.0,
+        "coverage": 0.0,
+        "warnings": [f"{module}: no observations; refs intentionally omitted"],
+        "errors": [],
+    }
+
+
+def _person_bbox_from_row(row: np.ndarray, *, character_id: str, frame_idx: int) -> tuple[float, float, float, float]:
+    return _validate_bbox(
+        (float(row[0]), float(row[1]), float(row[2]), float(row[3])),
+        label=f"{character_id} person frame {frame_idx}",
+    )
+
+
+def _new_arrays(frame_count: int) -> dict[str, np.ndarray]:
+    return {
+        "face_landmarks_2d": np.full((frame_count, FACE_LANDMARK_COUNT, 2), np.nan, dtype=np.float32),
+        "face_bbox_xyxy": np.full((frame_count, 4), np.nan, dtype=np.float32),
+        "face_confidence": np.zeros((frame_count,), dtype=np.float32),
+        "left_hand_landmarks_2d": np.full((frame_count, HAND_LANDMARK_COUNT, 2), np.nan, dtype=np.float32),
+        "left_hand_bbox_xyxy": np.full((frame_count, 4), np.nan, dtype=np.float32),
+        "left_hand_present": np.zeros((frame_count,), dtype=np.float32),
+        "left_handedness_confidence": np.zeros((frame_count,), dtype=np.float32),
+        "right_hand_landmarks_2d": np.full((frame_count, HAND_LANDMARK_COUNT, 2), np.nan, dtype=np.float32),
+        "right_hand_bbox_xyxy": np.full((frame_count, 4), np.nan, dtype=np.float32),
+        "right_hand_present": np.zeros((frame_count,), dtype=np.float32),
+        "right_handedness_confidence": np.zeros((frame_count,), dtype=np.float32),
+    }
+
+
+def _face_manifest(
+    *,
+    frame_count: int,
+    estimated: int,
+    present: int,
+    confidences: list[float],
+    uri: str,
+    checksum: str,
+) -> dict[str, Any]:
+    if estimated == 0:
+        return {
+            "enabled": False,
+            "landmark_count": 0,
+            "bbox_ref": None,
+            "landmarks_2d_ref": None,
+            "landmarks_3d_ref": None,
+            "blendshapes_ref": None,
+            "transform_ref": None,
+            "head_pose_ref": None,
+            "gaze_ref": None,
+            "eye_openness_ref": None,
+            "mouth_open_ref": None,
+            "blink_events": [],
+            "quality": _disabled_quality("face"),
+        }
+
+    landmarks_ref = _timeseries_ref(
+        uri=uri,
+        checksum=checksum,
+        shape=[frame_count, FACE_LANDMARK_COUNT, 2],
+        axes=["frame", "face_landmark", "xy"],
+        unit="px",
+        coordinate_space="pixel_xy",
+        frame_count=frame_count,
+        array_key="face_landmarks_2d",
+        nan_policy="preserve",
+    )
+    landmarks_ref["metadata"].update({"absent_value": "nan", "landmark_model_count": FACE_LANDMARK_COUNT})
+    bbox_ref = _timeseries_ref(
+        uri=uri,
+        checksum=checksum,
+        shape=[frame_count, 4],
+        axes=["frame", "bbox_component"],
+        unit="px",
+        coordinate_space="pixel_xy",
+        frame_count=frame_count,
+        array_key="face_bbox_xyxy",
+        nan_policy="preserve",
+    )
+    bbox_ref["metadata"].update({"bbox_format": "xyxy", "absent_value": "nan"})
+    return {
+        "enabled": True,
+        "landmark_count": FACE_LANDMARK_COUNT,
+        "bbox_ref": bbox_ref,
+        "landmarks_2d_ref": landmarks_ref,
+        "landmarks_3d_ref": None,
+        "blendshapes_ref": None,
+        "transform_ref": None,
+        "head_pose_ref": None,
+        "gaze_ref": None,
+        "eye_openness_ref": None,
+        "mouth_open_ref": None,
+        "blink_events": [],
+        "quality": _quality(estimated=estimated, present=present, confidences=confidences, module="face"),
+    }
+
+
+def _hand_manifest(
+    *,
+    side: Literal["left", "right"],
+    frame_count: int,
+    estimated: int,
+    present: int,
+    confidences: list[float],
+    uri: str,
+    checksum: str,
+) -> dict[str, Any]:
+    if estimated == 0:
+        return {
+            "enabled": False,
+            "landmark_count": 0,
+            "present_ref": None,
+            "bbox_ref": None,
+            "landmarks_2d_ref": None,
+            "landmarks_world_ref": None,
+            "handedness_ref": None,
+            "palm_normal_ref": None,
+            "finger_curl_ref": None,
+            "quality": _disabled_quality(f"{side} hand"),
+        }
+
+    landmarks_ref = _timeseries_ref(
+        uri=uri,
+        checksum=checksum,
+        shape=[frame_count, HAND_LANDMARK_COUNT, 2],
+        axes=["frame", "hand_landmark", "xy"],
+        unit="px",
+        coordinate_space="pixel_xy",
+        frame_count=frame_count,
+        array_key=f"{side}_hand_landmarks_2d",
+        nan_policy="preserve",
+    )
+    landmarks_ref["metadata"].update({"absent_value": "nan", "landmark_model_count": HAND_LANDMARK_COUNT})
+    bbox_ref = _timeseries_ref(
+        uri=uri,
+        checksum=checksum,
+        shape=[frame_count, 4],
+        axes=["frame", "bbox_component"],
+        unit="px",
+        coordinate_space="pixel_xy",
+        frame_count=frame_count,
+        array_key=f"{side}_hand_bbox_xyxy",
+        nan_policy="preserve",
+    )
+    bbox_ref["metadata"].update({"bbox_format": "xyxy", "absent_value": "nan"})
+    present_ref = _timeseries_ref(
+        uri=uri,
+        checksum=checksum,
+        shape=[frame_count],
+        axes=["frame"],
+        unit="confidence",
+        coordinate_space="none",
+        frame_count=frame_count,
+        array_key=f"{side}_hand_present",
+        nan_policy="zero_fill",
+    )
+    handedness_ref = _timeseries_ref(
+        uri=uri,
+        checksum=checksum,
+        shape=[frame_count],
+        axes=["frame"],
+        unit="confidence",
+        coordinate_space="none",
+        frame_count=frame_count,
+        array_key=f"{side}_handedness_confidence",
+        nan_policy="zero_fill",
+    )
+    return {
+        "enabled": True,
+        "landmark_count": HAND_LANDMARK_COUNT,
+        "present_ref": present_ref,
+        "bbox_ref": bbox_ref,
+        "landmarks_2d_ref": landmarks_ref,
+        "landmarks_world_ref": None,
+        "handedness_ref": handedness_ref,
+        "palm_normal_ref": None,
+        "finger_curl_ref": None,
+        "quality": _quality(
+            estimated=estimated,
+            present=present,
+            confidences=confidences,
+            module=f"{side} hand",
+        ),
+    }
+
+
 def run_face_hand_refinement(
     video_path: str,
     *,
@@ -240,12 +422,10 @@ def run_face_hand_refinement(
     output_dir: str,
     sidecars: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
-    """Run E3.2 anonymous face + hand geometry refinement on present person frames.
+    """Run model-agnostic E3.2 face/hand geometry on existing anonymous tracks.
 
-    The stage is model-agnostic. A caller injects a backend that operates only on
-    an existing anonymous character bbox. Missing face/hand observations are not
-    guessed or interpolated: image-plane landmark arrays remain NaN and presence
-    signals remain zero for those frames.
+    Missing observations stay explicit. Geometry is never interpolated or
+    synthesized, and a completely absent face/hand side exposes null refs.
     """
     if not os.path.isfile(video_path):
         raise FaceHandRefinementError(f"Normalized video does not exist: {video_path}")
@@ -266,30 +446,12 @@ def run_face_hand_refinement(
             raise FaceHandRefinementError(f"Duplicate character_id: {character_id}")
         bboxes = _load_character_bboxes(character, frame_count=frame_count, sidecars=sidecars)
         bboxes_by_character[character_id] = bboxes
+        arrays_by_character[character_id] = _new_arrays(frame_count)
         present_frames[character_id] = int(np.all(np.isfinite(bboxes), axis=1).sum())
         face_frames[character_id] = 0
         hand_frames[character_id] = {"left": 0, "right": 0}
         face_confidences[character_id] = []
         hand_confidences[character_id] = {"left": [], "right": []}
-        arrays_by_character[character_id] = {
-            "face_landmarks_2d": np.full(
-                (frame_count, FACE_LANDMARK_COUNT, 2), np.nan, dtype=np.float32
-            ),
-            "face_bbox_xyxy": np.full((frame_count, 4), np.nan, dtype=np.float32),
-            "face_confidence": np.zeros((frame_count,), dtype=np.float32),
-            "left_hand_landmarks_2d": np.full(
-                (frame_count, HAND_LANDMARK_COUNT, 2), np.nan, dtype=np.float32
-            ),
-            "left_hand_bbox_xyxy": np.full((frame_count, 4), np.nan, dtype=np.float32),
-            "left_hand_present": np.zeros((frame_count,), dtype=np.float32),
-            "left_handedness_confidence": np.zeros((frame_count,), dtype=np.float32),
-            "right_hand_landmarks_2d": np.full(
-                (frame_count, HAND_LANDMARK_COUNT, 2), np.nan, dtype=np.float32
-            ),
-            "right_hand_bbox_xyxy": np.full((frame_count, 4), np.nan, dtype=np.float32),
-            "right_hand_present": np.zeros((frame_count,), dtype=np.float32),
-            "right_handedness_confidence": np.zeros((frame_count,), dtype=np.float32),
-        }
 
     capture = cv2.VideoCapture(video_path)
     if not capture.isOpened():
@@ -303,19 +465,15 @@ def run_face_hand_refinement(
                 break
             for character in characters:
                 character_id = str(character["character_id"])
-                bbox = bboxes_by_character[character_id][decoded_frames]
-                if not np.all(np.isfinite(bbox)):
+                bbox_row = bboxes_by_character[character_id][decoded_frames]
+                if not np.all(np.isfinite(bbox_row)):
                     continue
-                person_bbox = _validate_bbox(
-                    tuple(float(value) for value in bbox),
-                    label=f"{character_id} person frame {decoded_frames}",
+                person_bbox = _person_bbox_from_row(
+                    bbox_row,
+                    character_id=character_id,
+                    frame_idx=decoded_frames,
                 )
-                observation = refiner.refine(
-                    frame,
-                    person_bbox,
-                    decoded_frames,
-                    character_id,
-                )
+                observation = refiner.refine(frame, person_bbox, decoded_frames, character_id)
                 if observation is None:
                     continue
                 face, hands = _validate_observation(
@@ -325,33 +483,29 @@ def run_face_hand_refinement(
                 )
                 arrays = arrays_by_character[character_id]
                 if face is not None:
-                    face_xy = _validate_landmarks(
-                        face.landmarks_xy,
-                        count=FACE_LANDMARK_COUNT,
-                        label="Face",
+                    confidence = _validate_confidence(face.confidence, label="Face")
+                    arrays["face_landmarks_2d"][decoded_frames] = _validate_landmarks(
+                        face.landmarks_xy, count=FACE_LANDMARK_COUNT, label="Face"
                     )
-                    face_bbox = _validate_bbox(face.bbox_xyxy, label="Face")
-                    face_confidence = _validate_confidence(face.confidence, label="Face")
-                    arrays["face_landmarks_2d"][decoded_frames] = face_xy
-                    arrays["face_bbox_xyxy"][decoded_frames] = face_bbox
-                    arrays["face_confidence"][decoded_frames] = face_confidence
+                    arrays["face_bbox_xyxy"][decoded_frames] = _validate_bbox(face.bbox_xyxy, label="Face")
+                    arrays["face_confidence"][decoded_frames] = confidence
                     face_frames[character_id] += 1
-                    face_confidences[character_id].append(face_confidence)
-
+                    face_confidences[character_id].append(confidence)
                 for side, hand in hands.items():
-                    landmarks = _validate_landmarks(
-                        hand.landmarks_xy,
-                        count=HAND_LANDMARK_COUNT,
-                        label=f"{side} hand",
-                    )
-                    hand_bbox = _validate_bbox(hand.bbox_xyxy, label=f"{side} hand")
                     confidence = _validate_confidence(hand.confidence, label=f"{side} hand")
                     handedness = _validate_confidence(
                         hand.handedness_confidence,
                         label=f"{side} handedness",
                     )
-                    arrays[f"{side}_hand_landmarks_2d"][decoded_frames] = landmarks
-                    arrays[f"{side}_hand_bbox_xyxy"][decoded_frames] = hand_bbox
+                    arrays[f"{side}_hand_landmarks_2d"][decoded_frames] = _validate_landmarks(
+                        hand.landmarks_xy,
+                        count=HAND_LANDMARK_COUNT,
+                        label=f"{side} hand",
+                    )
+                    arrays[f"{side}_hand_bbox_xyxy"][decoded_frames] = _validate_bbox(
+                        hand.bbox_xyxy,
+                        label=f"{side} hand",
+                    )
                     arrays[f"{side}_hand_present"][decoded_frames] = confidence
                     arrays[f"{side}_handedness_confidence"][decoded_frames] = handedness
                     hand_frames[character_id][side] += 1
@@ -369,132 +523,33 @@ def run_face_hand_refinement(
     report_characters: list[dict[str, Any]] = []
     for character in characters:
         character_id = str(character["character_id"])
-        arrays = arrays_by_character[character_id]
         uri, path, checksum = _write_character_sidecar(
             character_id,
-            arrays=arrays,
+            arrays=arrays_by_character[character_id],
             output_dir=output_dir,
         )
         refinement_sidecars[uri] = path
         present_count = present_frames[character_id]
-
-        face_landmarks_ref = _timeseries_ref(
+        character["face"] = _face_manifest(
+            frame_count=frame_count,
+            estimated=face_frames[character_id],
+            present=present_count,
+            confidences=face_confidences[character_id],
             uri=uri,
             checksum=checksum,
-            shape=[frame_count, FACE_LANDMARK_COUNT, 2],
-            axes=["frame", "face_landmark", "xy"],
-            unit="px",
-            coordinate_space="pixel_xy",
-            frame_count=frame_count,
-            array_key="face_landmarks_2d",
-            nan_policy="preserve",
         )
-        face_landmarks_ref["metadata"].update(
-            {"absent_value": "nan", "landmark_model_count": FACE_LANDMARK_COUNT}
-        )
-        face_bbox_ref = _timeseries_ref(
-            uri=uri,
-            checksum=checksum,
-            shape=[frame_count, 4],
-            axes=["frame", "bbox_component"],
-            unit="px",
-            coordinate_space="pixel_xy",
-            frame_count=frame_count,
-            array_key="face_bbox_xyxy",
-            nan_policy="preserve",
-        )
-        face_bbox_ref["metadata"].update({"bbox_format": "xyxy", "absent_value": "nan"})
-        character["face"] = {
-            "enabled": True,
-            "landmark_count": FACE_LANDMARK_COUNT,
-            "bbox_ref": face_bbox_ref,
-            "landmarks_2d_ref": face_landmarks_ref,
-            "landmarks_3d_ref": None,
-            "blendshapes_ref": None,
-            "transform_ref": None,
-            "head_pose_ref": None,
-            "gaze_ref": None,
-            "eye_openness_ref": None,
-            "mouth_open_ref": None,
-            "blink_events": [],
-            "quality": _quality(
-                estimated=face_frames[character_id],
+        character["hands"] = {
+            side: _hand_manifest(
+                side=side,
+                frame_count=frame_count,
+                estimated=hand_frames[character_id][side],
                 present=present_count,
-                confidences=face_confidences[character_id],
-                module="face",
-            ),
+                confidences=hand_confidences[character_id][side],
+                uri=uri,
+                checksum=checksum,
+            )
+            for side in ("left", "right")
         }
-
-        hands_manifest: dict[str, Any] = {}
-        for side in ("left", "right"):
-            estimated = hand_frames[character_id][side]
-            landmarks_ref = _timeseries_ref(
-                uri=uri,
-                checksum=checksum,
-                shape=[frame_count, HAND_LANDMARK_COUNT, 2],
-                axes=["frame", "hand_landmark", "xy"],
-                unit="px",
-                coordinate_space="pixel_xy",
-                frame_count=frame_count,
-                array_key=f"{side}_hand_landmarks_2d",
-                nan_policy="preserve",
-            )
-            landmarks_ref["metadata"].update(
-                {"absent_value": "nan", "landmark_model_count": HAND_LANDMARK_COUNT}
-            )
-            bbox_ref = _timeseries_ref(
-                uri=uri,
-                checksum=checksum,
-                shape=[frame_count, 4],
-                axes=["frame", "bbox_component"],
-                unit="px",
-                coordinate_space="pixel_xy",
-                frame_count=frame_count,
-                array_key=f"{side}_hand_bbox_xyxy",
-                nan_policy="preserve",
-            )
-            bbox_ref["metadata"].update({"bbox_format": "xyxy", "absent_value": "nan"})
-            present_ref = _timeseries_ref(
-                uri=uri,
-                checksum=checksum,
-                shape=[frame_count],
-                axes=["frame"],
-                unit="confidence",
-                coordinate_space="none",
-                frame_count=frame_count,
-                array_key=f"{side}_hand_present",
-                nan_policy="zero_fill",
-            )
-            handedness_ref = _timeseries_ref(
-                uri=uri,
-                checksum=checksum,
-                shape=[frame_count],
-                axes=["frame"],
-                unit="confidence",
-                coordinate_space="none",
-                frame_count=frame_count,
-                array_key=f"{side}_handedness_confidence",
-                nan_policy="zero_fill",
-            )
-            hands_manifest[side] = {
-                "enabled": estimated > 0,
-                "landmark_count": HAND_LANDMARK_COUNT if estimated > 0 else 0,
-                "present_ref": present_ref,
-                "bbox_ref": bbox_ref,
-                "landmarks_2d_ref": landmarks_ref,
-                "landmarks_world_ref": None,
-                "handedness_ref": handedness_ref,
-                "palm_normal_ref": None,
-                "finger_curl_ref": None,
-                "quality": _quality(
-                    estimated=estimated,
-                    present=present_count,
-                    confidences=hand_confidences[character_id][side],
-                    module=f"{side} hand",
-                ),
-            }
-        character["hands"] = hands_manifest
-
         report_characters.append(
             {
                 "character_id": character_id,
