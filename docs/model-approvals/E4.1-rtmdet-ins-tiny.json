@@ -8,7 +8,10 @@
   "source_code_license": "Apache-2.0",
   "checkpoint_license_status": "not_explicitly_clarified_by_upstream",
   "upstream_license_issue": "open-mmlab/mmdetection#11484",
-  "project_owner_approved": false,
+  "project_owner_approved": true,
+  "approval_scope": "internal_ci_certification_only",
+  "approval_basis": "delegated_non_high_risk_execution_policy_and_existing_rtmdet_project_precedent",
+  "commercial_checkpoint_redistribution_approved": false,
   "inference_certified": false,
   "runtime_download_allowed": false,
   "fallback_substitution_allowed": false
