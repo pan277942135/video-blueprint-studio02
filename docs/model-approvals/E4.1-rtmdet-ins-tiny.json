@@ -1,0 +1,15 @@
+{
+  "epic": "E4.1",
+  "model": "rtmdet-ins_tiny_8xb32-300e_coco",
+  "purpose": "anonymous per-frame person instance segmentation",
+  "checkpoint_sha256": "ec670f7ee9e20bd7931e15f15b7016f7fe531baaab81f2e6153382d046111885",
+  "checkpoint_size_bytes": 22757492,
+  "source": "OpenMMLab MMDetection Model Zoo",
+  "source_code_license": "Apache-2.0",
+  "checkpoint_license_status": "not_explicitly_clarified_by_upstream",
+  "upstream_license_issue": "open-mmlab/mmdetection#11484",
+  "project_owner_approved": false,
+  "inference_certified": false,
+  "runtime_download_allowed": false,
+  "fallback_substitution_allowed": false
+}
