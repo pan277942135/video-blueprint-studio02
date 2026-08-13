@@ -21,6 +21,9 @@ from packages.pipeline_core.media_probe import compute_sha256
 from packages.pipeline_core.real_media_pipeline import run_real_media_pipeline
 
 
+VERIFIED_RTMPOSE_SHA256 = "77ffc7e802acf10951c353e8bc68b4f05218121177ceaea163aa124436ba6fb7"
+
+
 def _sha256_file(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -38,8 +41,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--rtmpose-checkpoint", required=True)
     parser.add_argument("--schema", default="contracts/video_blueprint.schema.json")
     parser.add_argument("--output", default=".cert/e3_rtmpose_certification.json")
-    parser.add_argument("--rtmpose-sha-prefix", default="e613ba3f")
-    parser.add_argument("--expected-rtmpose-sha256", default="")
+    parser.add_argument("--expected-rtmpose-sha256", default=VERIFIED_RTMPOSE_SHA256)
     parser.add_argument(
         "--expected-rtmdet-sha256",
         default="78e30dcce0c6f594eaff0d6977b84b4103688b4aff0ad1aa16008a8cc854a7fb",
@@ -142,15 +144,11 @@ def main() -> int:
         )
 
     rtmpose_sha256 = _sha256_file(rtmpose_checkpoint)
-    if not rtmpose_sha256.startswith(args.rtmpose_sha_prefix.lower()):
-        raise SystemExit(
-            "RTMPose checkpoint hash does not match the publisher filename hash prefix: "
-            f"expected {args.rtmpose_sha_prefix.lower()}, got {rtmpose_sha256}"
-        )
-    if args.expected_rtmpose_sha256 and rtmpose_sha256 != args.expected_rtmpose_sha256.lower():
+    expected_rtmpose_sha256 = args.expected_rtmpose_sha256.lower()
+    if rtmpose_sha256 != expected_rtmpose_sha256:
         raise SystemExit(
             "RTMPose checkpoint SHA256 mismatch: "
-            f"expected {args.expected_rtmpose_sha256.lower()}, got {rtmpose_sha256}"
+            f"expected {expected_rtmpose_sha256}, got {rtmpose_sha256}"
         )
 
     os.environ["VBS_RTMDET_CONFIG"] = str(rtmdet_config)
