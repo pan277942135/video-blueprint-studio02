@@ -111,9 +111,9 @@ def _load_character_bboxes(
         raise PoseEstimationError(f"Character {character_id} is missing bbox_ref")
     uri = bbox_ref.get("uri")
     array_key = bbox_ref.get("metadata", {}).get("array_key")
-    path = sidecars.get(uri)
     if not isinstance(uri, str) or not isinstance(array_key, str):
         raise PoseEstimationError(f"Character {character_id} has an invalid bbox_ref")
+    path = sidecars.get(uri)
     if not isinstance(path, (str, os.PathLike)) or not os.path.isfile(str(path)):
         raise PoseEstimationError(f"Character {character_id} bbox sidecar is unavailable: {uri}")
 
