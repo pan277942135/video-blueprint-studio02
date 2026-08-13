@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import zipfile
 from typing import Any
 
@@ -42,9 +43,16 @@ def create_bundle_zip(
             "sha256": calculate_sha256_bytes(val_report_bytes)
         })
 
-        # 3. Write sidecars
+        # 3. Write sidecars / artifacts
         for sidecar_path, sidecar_content in sidecars.items():
-            s_bytes = json.dumps(sidecar_content, indent=2).encode('utf-8')
+            if isinstance(sidecar_content, (str, os.PathLike)) and os.path.isfile(str(sidecar_content)):
+                with open(sidecar_content, "rb") as f:
+                    s_bytes = f.read()
+            elif isinstance(sidecar_content, bytes):
+                s_bytes = sidecar_content
+            else:
+                s_bytes = json.dumps(sidecar_content, indent=2).encode('utf-8')
+
             zip_file.writestr(sidecar_path, s_bytes)
             bundle_manifest_files.append({
                 "path": sidecar_path,
@@ -63,3 +71,4 @@ def create_bundle_zip(
         zip_file.writestr('bundle_manifest.json', manifest_bytes)
 
     return output_zip_path
+

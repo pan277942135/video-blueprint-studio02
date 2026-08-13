@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import statistics
@@ -52,6 +53,8 @@ class MediaNormalizationResult:
     pixel_format: str
     ffmpeg_command: list[str]
     normalization_profile: str
+    mapping_error_max_us: float
+    mapping_error_mean_us: float
 
 
 STANDARD_RATIONAL_FPS = [
@@ -184,6 +187,81 @@ def generate_source_pts_map(
     return matrix, max_err, mean_err
 
 
+def probe_stream_durations_us(file_path: str) -> tuple[int, int | None]:
+    """
+    Returns (video_duration_us, audio_duration_us) for media file.
+    Probes video stream (v:0) and audio stream (a:0) independently.
+    """
+    ffprobe_bin = shutil.which("ffprobe") or "ffprobe"
+    cmd = [
+        ffprobe_bin,
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams",
+        file_path
+    ]
+    res = subprocess.run(cmd, capture_output=True, check=True, text=True)
+    data = json.loads(res.stdout)
+    streams = data.get("streams", [])
+
+    video_streams = [s for s in streams if s.get("codec_type") == "video"]
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+
+    video_dur_us: int | None = None
+    if video_streams:
+        v_s = video_streams[0]
+        if "duration" in v_s and v_s["duration"] != "N/A":
+            try:
+                video_dur_us = round(float(v_s["duration"]) * 1_000_000)
+            except ValueError:
+                pass
+
+    audio_dur_us: int | None = None
+    if audio_streams:
+        a_s = audio_streams[0]
+        if "duration" in a_s and a_s["duration"] != "N/A":
+            try:
+                audio_dur_us = round(float(a_s["duration"]) * 1_000_000)
+            except ValueError:
+                pass
+
+    if video_dur_us is None and video_streams:
+        cmd_v = [
+            ffprobe_bin, "-v", "quiet", "-print_format", "json",
+            "-show_entries", "frame=pkt_pts_time,pkt_duration_time",
+            "-select_streams", "v:0", file_path
+        ]
+        res_v = subprocess.run(cmd_v, capture_output=True, text=True)
+        if res_v.returncode == 0:
+            v_frames = json.loads(res_v.stdout).get("frames", [])
+            if v_frames:
+                last_f = v_frames[-1]
+                pts = float(last_f.get("pkt_pts_time", 0))
+                dur = float(last_f.get("pkt_duration_time", 0))
+                video_dur_us = round((pts + dur) * 1_000_000)
+
+    if audio_streams and audio_dur_us is None:
+        cmd_a = [
+            ffprobe_bin, "-v", "quiet", "-print_format", "json",
+            "-show_entries", "packet=pts_time,duration_time",
+            "-select_streams", "a:0", file_path
+        ]
+        res_a = subprocess.run(cmd_a, capture_output=True, text=True)
+        if res_a.returncode == 0:
+            a_pkts = json.loads(res_a.stdout).get("packets", [])
+            if a_pkts:
+                last_p = a_pkts[-1]
+                pts = float(last_p.get("pts_time", 0))
+                dur = float(last_p.get("duration_time", 0))
+                audio_dur_us = round((pts + dur) * 1_000_000)
+
+    if video_dur_us is None:
+        norm_p = probe_media(file_path)
+        video_dur_us = norm_p.duration_us
+
+    return video_dur_us, audio_dur_us
+
+
 def validate_normalization(
     normalized_video_path: str,
     probe_result: MediaProbeResult,
@@ -191,9 +269,10 @@ def validate_normalization(
     target_fps_den: int,
     pts_map_matrix: np.ndarray,
     max_av_drift_us: int = 50000
-) -> MediaProbeResult:
+) -> tuple[MediaProbeResult, int, int | None, int | None]:
     """
     Re-probes normalized video and validates all contract/normalization invariants.
+    Returns (norm_probe, video_duration_us, audio_duration_us, audio_video_drift_us).
     """
     if not os.path.exists(normalized_video_path):
         raise NormalizationValidationError(f"Normalized output file missing: {normalized_video_path}")
@@ -236,11 +315,15 @@ def validate_normalization(
             f"Normalized video FPS {norm_probe.fps_avg:.3f} diverges from target {target_fps_float:.3f}"
         )
 
+    video_dur_us, audio_dur_us = probe_stream_durations_us(normalized_video_path)
+
     if probe_result.has_audio:
         if not norm_probe.has_audio:
             raise NormalizationValidationError("Source has audio but normalized video is missing audio stream")
+        if audio_dur_us is None:
+            raise NormalizationValidationError("Unable to determine audio stream duration in normalized output")
 
-        drift = abs(norm_probe.duration_us - norm_probe.duration_us)
+        drift = abs(audio_dur_us - video_dur_us)
         frame_dur_us = 1_000_000 * target_fps_den / target_fps_num
         max_allowed_drift = max(max_av_drift_us, round(frame_dur_us))
         if drift > max_allowed_drift:
@@ -250,8 +333,9 @@ def validate_normalization(
     else:
         if norm_probe.has_audio:
             raise NormalizationValidationError("Source has no audio but normalized video contains audio stream")
+        drift = None
 
-    return norm_probe
+    return norm_probe, video_dur_us, audio_dur_us, drift
 
 
 def normalize_media_to_cfr(
@@ -284,16 +368,27 @@ def normalize_media_to_cfr(
     fps_num, fps_den = determine_target_fps(probe_result, analysis_fps_max)
     fps_float = fps_num / fps_den
 
+    cfr_flag = ["-fps_mode", "cfr"]
+    ff_bin = shutil.which("ffmpeg") or "ffmpeg"
+    try:
+        h_res = subprocess.run([ff_bin, "-h"], capture_output=True, text=True)
+        if "-fps_mode" not in h_res.stdout and "-fps_mode" not in h_res.stderr:
+            cfr_flag = ["-vsync", "cfr"]
+    except Exception:
+        pass
+
     cmd = [
         "ffmpeg", "-y",
         "-i", video_path,
-        "-vf", f"setpts=PTS-STARTPTS,fps={fps_num}/{fps_den}:round=near",
-        "-vsync", "cfr",
+        "-vf", f"setpts=PTS-STARTPTS,fps={fps_num}/{fps_den}:round=near"
+    ]
+    cmd.extend(cfr_flag)
+    cmd.extend([
         "-c:v", video_codec,
         "-preset", preset,
         "-crf", str(crf),
         "-pix_fmt", "yuv420p"
-    ]
+    ])
     if probe_result.has_audio:
         cmd.extend([
             "-af", "asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0",
@@ -318,7 +413,7 @@ def normalize_media_to_cfr(
     norm_probe_pre = probe_media(normalized_video_path)
     frame_count = norm_probe_pre.source_frame_count or 1
 
-    pts_map_matrix, _max_err_us, _mean_err_us = generate_source_pts_map(
+    pts_map_matrix, max_err_us, mean_err_us = generate_source_pts_map(
         norm_frame_count=frame_count,
         fps_num=fps_num,
         fps_den=fps_den,
@@ -328,7 +423,7 @@ def normalize_media_to_cfr(
 
     np.savez_compressed(source_pts_map_path, source_pts_map=pts_map_matrix)
 
-    norm_probe = validate_normalization(
+    norm_probe, video_dur_us, audio_dur_us, drift_us = validate_normalization(
         normalized_video_path=normalized_video_path,
         probe_result=probe_result,
         target_fps_num=fps_num,
@@ -342,8 +437,6 @@ def normalize_media_to_cfr(
 
     frame_duration_us = 1_000_000 * fps_den / fps_num
     end_pts_us = round((frame_count - 1) * frame_duration_us)
-
-    drift_us = 0 if probe_result.has_audio else None
 
     return MediaNormalizationResult(
         normalized_video_path=normalized_video_path,
@@ -359,11 +452,14 @@ def normalize_media_to_cfr(
         source_pts_map_sha256=pts_map_sha256,
         source_variable_frame_rate=probe_result.variable_frame_rate,
         audio_preserved=probe_result.has_audio,
-        audio_duration_us=norm_probe.duration_us if probe_result.has_audio else None,
-        video_duration_us=norm_probe.duration_us,
+        audio_duration_us=audio_dur_us,
+        video_duration_us=video_dur_us,
         audio_video_drift_us=drift_us,
         codec=norm_probe.video_codec,
         pixel_format=norm_probe.pixel_format or "yuv420p",
         ffmpeg_command=cmd,
-        normalization_profile="analysis_cfr_v1"
+        normalization_profile="analysis_cfr_v1",
+        mapping_error_max_us=max_err_us,
+        mapping_error_mean_us=mean_err_us
     )
+

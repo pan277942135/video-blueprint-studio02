@@ -65,6 +65,8 @@ def run_deterministic_mock_pipeline(
                 "metadata": {
                     "columns": ["normalized_pts_us", "source_pts_us"],
                     "mapping_policy": "nearest",
+                    "mapping_error_max_us": norm_res.mapping_error_max_us,
+                    "mapping_error_mean_us": norm_res.mapping_error_mean_us,
                     "source_start_pts_us": probe_res.start_pts_us,
                     "target_fps_num": norm_res.fps_num,
                     "target_fps_den": norm_res.fps_den

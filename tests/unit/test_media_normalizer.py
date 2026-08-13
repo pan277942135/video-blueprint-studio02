@@ -227,3 +227,50 @@ def test_normalization_failure_raises_exception():
 def test_validate_normalization_bad_path():
     with pytest.raises(NormalizationValidationError):
         validate_normalization("invalid_file.mp4", None, 30, 1, np.zeros((10, 2)))
+
+
+def test_mapping_error_provenance(cfr_30fps_video):
+    probe_res = probe_media(cfr_30fps_video)
+    with tempfile.TemporaryDirectory() as temp_out:
+        norm_res = normalize_media_to_cfr(cfr_30fps_video, probe_res, temp_out)
+        assert isinstance(norm_res.mapping_error_max_us, float)
+        assert isinstance(norm_res.mapping_error_mean_us, float)
+        assert norm_res.mapping_error_max_us >= 0.0
+        assert norm_res.mapping_error_mean_us >= 0.0
+
+
+def test_av_drift_measurement_and_validation_failure():
+    temp_dir = tempfile.mkdtemp()
+    try:
+        mismatched_video = os.path.join(temp_dir, "mismatched_av.mp4")
+        # Generate 2s video stream and 3.5s audio stream
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30", "-t", "2.0",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "3.5",
+            "-c:v", "libx264", "-c:a", "aac",
+            "-pix_fmt", "yuv420p",
+            mismatched_video
+        ]
+        subprocess.run(cmd, capture_output=True, check=True)
+
+        probe_res = probe_media(mismatched_video)
+        with tempfile.TemporaryDirectory() as temp_out:
+            # High threshold allows normalization to pass and measure drift
+            norm_res = normalize_media_to_cfr(mismatched_video, probe_res, temp_out, max_av_drift_us=2_000_000)
+            assert norm_res.audio_video_drift_us is not None
+            assert norm_res.audio_video_drift_us > 100_000
+
+            # Exceeding tight threshold MUST fail validation
+            with pytest.raises(NormalizationValidationError, match="drift"):
+                validate_normalization(
+                    normalized_video_path=norm_res.normalized_video_path,
+                    probe_result=probe_res,
+                    target_fps_num=norm_res.fps_num,
+                    target_fps_den=norm_res.fps_den,
+                    pts_map_matrix=np.zeros((norm_res.frame_count, 2), dtype=np.int64),
+                    max_av_drift_us=10_000
+                )
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
