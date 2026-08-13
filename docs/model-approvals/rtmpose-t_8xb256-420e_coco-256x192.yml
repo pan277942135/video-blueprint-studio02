@@ -9,10 +9,11 @@ upstream:
   model_index: "configs/body_2d_keypoint/rtmpose/coco/rtmpose_coco.yml"
   config: "configs/body_2d_keypoint/rtmpose/coco/rtmpose-t_8xb256-420e_coco-256x192.py"
   weights_url: "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmpose-tiny_simcc-coco_pt-aic-coco_420e-256x192-e613ba3f_20230127.pth"
+  upstream_filename_tag: "e613ba3f"
 integrity:
-  publisher_filename_sha256_prefix: "e613ba3f"
-  verified_sha256: null
-  verification_status: "pending_full_sha256_certification"
+  verified_sha256: "77ffc7e802acf10951c353e8bc68b4f05218121177ceaea163aa124436ba6fb7"
+  verification_status: "downloaded_from_approved_upstream_url_and_full_sha256_locked"
+  note: "The upstream filename tag e613ba3f is not treated as a SHA256 prefix; runtime integrity is gated by the full verified SHA256 above."
 certification:
   status: pending
   workflow_run_id: null
@@ -23,7 +24,7 @@ certification:
   max_mean_nonzero_confidence: null
 license_record:
   runtime_code: "MMPose Apache-2.0"
-  checkpoint_note: "Official OpenMMLab model-zoo checkpoint explicitly approved by the project user for this project; exact downloaded SHA256 must be recorded before runtime certification is final."
+  checkpoint_note: "Official OpenMMLab model-zoo checkpoint explicitly approved by the project user for this project; the downloaded checkpoint is locked by exact SHA256 before runtime certification."
 privacy:
   identity_inference_performed: false
   biometric_embedding_exported: false
