@@ -120,7 +120,8 @@ def test_runtime_e2e_real_media_pipeline(real_video_file):
 
             bp = json.loads(z.read("blueprint.json").decode("utf-8"))
             validation_report = json.loads(z.read("validation_report.json").decode("utf-8"))
-            shot_report = json.loads(z.read("artifacts/reports/shot_detection.json").decode("utf-8"))
+            shot_report_bytes = z.read("artifacts/reports/shot_detection.json")
+            shot_report = json.loads(shot_report_bytes.decode("utf-8"))
 
             timebase = bp["timebase"]
             source_vid = bp["source_video"]
@@ -153,6 +154,17 @@ def test_runtime_e2e_real_media_pipeline(real_video_file):
             assert shot_report["shot_count"] == len(shots)
             assert shot_report["frame_count"] == 240
             assert shot_report["backend"] == "pyscenedetect_content_detector"
+
+            report_refs = bp["artifacts"]["reports"]
+            assert len(report_refs) == 1
+            assert report_refs[0]["uri"] == "artifacts/reports/shot_detection.json"
+            assert report_refs[0]["kind"] == "shot_detection"
+            assert report_refs[0]["sha256"] == hashlib.sha256(shot_report_bytes).hexdigest()
+
+            provenance_tools = bp["provenance"]["tools"]
+            assert {tool["module"] for tool in provenance_tools} == {"shot_detection", "shot_keyframes"}
+            assert all(tool["version"] != "unknown" for tool in provenance_tools)
+            assert all(tool["weights_sha256"] is None for tool in provenance_tools)
 
             z.extract("artifacts/timeseries/source_pts_map.npz", path=extract_dir)
             npz_path = os.path.join(extract_dir, "artifacts", "timeseries", "source_pts_map.npz")
