@@ -41,7 +41,9 @@ jobs:
           pip install "mmcv==2.1.0" -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html
           pip install "mmdet==3.3.0"
           pip install "mmpose==1.3.2" --no-deps
-          pip install chumpy json_tricks matplotlib munkres pillow scipy "xtcocotools>=1.12"
+          # RTMPose COCO-17 inference does not import MMPose's legacy SMPL/chumpy path.
+          # Keep the certification environment to the runtime modules actually exercised.
+          pip install json_tricks matplotlib munkres pillow scipy "xtcocotools>=1.12"
           pip install "jsonschema>=4.18.0" "scenedetect>=0.6.7,<0.7"
           pip install -e . --no-deps
           python - <<'PY'
