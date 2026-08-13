@@ -126,6 +126,8 @@ def test_run_person_tracking_emits_dense_sidecars_and_overlay(five_frame_video, 
     assert character["privacy"]["biometric_embedding_exported"] is False
     assert character["pose"]["enabled"] is False
     assert character["face"]["enabled"] is False
+    assert character["face"]["landmarks_2d_ref"] is None
+    assert character["face"]["landmarks_3d_ref"] is None
     assert character["presence"] == [{"frame_start": 0, "frame_end": 4}]
     assert shots[0]["dominant_character_ids"] == ["char_000"]
 

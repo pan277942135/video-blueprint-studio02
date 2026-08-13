@@ -22,6 +22,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+e3_face_hands = [
+    "mediapipe==0.10.35"
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",

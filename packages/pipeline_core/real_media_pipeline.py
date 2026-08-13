@@ -4,7 +4,9 @@ import os
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
+from packages.pipeline_core.face_hand_refinement import FaceHandRefinementError, run_face_hand_refinement
 from packages.pipeline_core.media_probe import InvalidMediaError
+from packages.pipeline_core.mediapipe_face_hand_backend import MediaPipeFaceHandRefiner
 from packages.pipeline_core.mock_pipeline import run_deterministic_mock_pipeline
 from packages.pipeline_core.person_tracking import PersonTrackingConfig, run_person_tracking
 from packages.pipeline_core.pose_estimation import PoseEstimationError, run_pose_estimation
@@ -23,6 +25,7 @@ def _combined_config_hash(
     tracking_config: PersonTrackingConfig | None = None,
     detector: RTMDetPersonDetector | None = None,
     pose_estimator: RTMPosePoseEstimator | None = None,
+    face_hand_refiner: MediaPipeFaceHandRefiner | None = None,
 ) -> str:
     parts = [
         f"shots:{shot_config.threshold}:{shot_config.min_scene_len_frames}",
@@ -44,6 +47,14 @@ def _combined_config_hash(
                 f"rtmpose-weights:{pose_estimator.weights_sha256}",
             ]
         )
+    if face_hand_refiner is not None:
+        parts.extend(
+            [
+                f"mediapipe-config:{face_hand_refiner.config_sha256}",
+                f"mediapipe-face-task:{face_hand_refiner.face_task_sha256}",
+                f"mediapipe-hand-task:{face_hand_refiner.hand_task_sha256}",
+            ]
+        )
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
@@ -59,21 +70,49 @@ def _json_sha256(value: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _minimum_enabled_quality(characters: list[dict[str, Any]], component: str) -> float:
+    scores: list[float] = []
+    for character in characters:
+        value = character.get(component)
+        if isinstance(value, dict) and value.get("enabled") is True:
+            quality = value.get("quality", {})
+            if isinstance(quality, dict):
+                scores.append(float(quality.get("score", 0.0)))
+    return min(scores, default=0.0)
+
+
+def _minimum_enabled_hand_quality(characters: list[dict[str, Any]]) -> float:
+    scores: list[float] = []
+    for character in characters:
+        hands = character.get("hands", {})
+        if not isinstance(hands, dict):
+            continue
+        for side in ("left", "right"):
+            hand = hands.get(side, {})
+            if isinstance(hand, dict) and hand.get("enabled") is True:
+                quality = hand.get("quality", {})
+                if isinstance(quality, dict):
+                    scores.append(float(quality.get("score", 0.0)))
+    return min(scores, default=0.0)
+
+
 def run_real_media_pipeline(
     job_id: str,
     video_file_name: str,
     video_sha256: str,
     video_path: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run the real-media pipeline through E3.1 anonymous 2D pose analysis.
+    """Run the real-media pipeline through E3.2 anonymous face/hand geometry.
 
     E1 provides real source probing, normalization, and PTS mapping. E2.1 runs
     real PySceneDetect shot detection unconditionally. E2.2 runs RTMDet person
     detection and anonymous IoU track association only when a complete,
     explicitly approved local RTMDet configuration is present. E3.1 runs
-    top-down RTMPose COCO-17 estimation only when a complete, explicitly
-    approved local RTMPose configuration is present. Partial or unapproved
-    model configuration is a hard failure; no model fallback is allowed.
+    top-down RTMPose COCO-17 estimation only when its approved local runtime is
+    present. E3.2 runs pinned MediaPipe FaceLandmarker/HandLandmarker VIDEO
+    tasks only when both approved local task artifacts are present. Partial or
+    unapproved model configuration is a hard failure; no model fallback or
+    runtime download is allowed.
     """
     if not video_path:
         raise InvalidMediaError("Real-media analysis requires a persisted uploaded video path")
@@ -93,13 +132,15 @@ def run_real_media_pipeline(
 
     timebase = blueprint["timebase"]
     frame_count = int(timebase["frame_count"])
+    fps_num = int(timebase["fps_num"])
+    fps_den = int(timebase["fps_den"])
     shot_config = ShotDetectionConfig()
     artifact_root = os.path.join(os.path.dirname(video_path), f"vbs_artifacts_{job_id}")
     shots, shot_sidecars = detect_shots(
         str(normalized_path),
         frame_count=frame_count,
-        fps_num=int(timebase["fps_num"]),
-        fps_den=int(timebase["fps_den"]),
+        fps_num=fps_num,
+        fps_den=fps_den,
         output_dir=artifact_root,
         config=shot_config,
     )
@@ -170,6 +211,34 @@ def run_real_media_pipeline(
             default=0.0,
         )
 
+    face_hand_refiner = MediaPipeFaceHandRefiner.from_environment(fps_num=fps_num, fps_den=fps_den)
+    if face_hand_refiner is not None and not people_enabled:
+        raise FaceHandRefinementError(
+            "E3.2 MediaPipe face/hands requires E2.2 anonymous person tracking; configure approved RTMDet first"
+        )
+
+    face_hands_enabled = face_hand_refiner is not None
+    face_score = 0.0
+    hands_score = 0.0
+    if face_hand_refiner is not None:
+        try:
+            characters, refinement_sidecars, refinement_report_ref = run_face_hand_refinement(
+                str(normalized_path),
+                characters=blueprint["characters"],
+                frame_count=frame_count,
+                refiner=face_hand_refiner,
+                output_dir=artifact_root,
+                sidecars=sidecars,
+            )
+        finally:
+            face_hand_refiner.close()
+        sidecars.update(refinement_sidecars)
+        blueprint["characters"] = characters
+        blueprint["artifacts"]["reports"].append(refinement_report_ref)
+        face_score = _minimum_enabled_quality(characters, "face")
+        hands_score = _minimum_enabled_hand_quality(characters)
+        blueprint["schema_version"] = "1.1.0"
+
     # Camera/environment analysis belongs to later Epics. Remove E0 placeholder
     # confidence claims from the real-media path rather than presenting mock
     # values as measured results.
@@ -204,12 +273,19 @@ def run_real_media_pipeline(
         overall_components.append(people_score)
     if pose_enabled and blueprint["characters"]:
         overall_components.append(pose_score)
+    if face_hands_enabled and blueprint["characters"]:
+        if face_score > 0.0:
+            overall_components.append(face_score)
+        if hands_score > 0.0:
+            overall_components.append(hands_score)
     blueprint["quality"]["overall_score"] = min(overall_components)
     blueprint["quality"]["module_scores"] = {
         "media": 1.0,
         "shots": shot_score,
         "people": people_score,
         "pose_2d": pose_score,
+        "face_2d": face_score,
+        "hands_2d": hands_score,
         "camera": 0.0,
         "environment": 0.0,
     }
@@ -222,14 +298,19 @@ def run_real_media_pipeline(
         blueprint["quality"]["warnings"].append(
             "E3.1 RTMPose 2D pose is disabled until approved local model configuration is supplied"
         )
+    if not face_hands_enabled:
+        blueprint["quality"]["warnings"].append(
+            "E3.2 MediaPipe face/hands is disabled until both approved pinned task artifacts are supplied locally"
+        )
 
     combined_config_hash = _combined_config_hash(
         shot_config,
         tracking_config,
         detector,
         pose_estimator,
+        face_hand_refiner,
     )
-    blueprint["processing"]["pipeline_version"] = "0.3.0-e3.1"
+    blueprint["processing"]["pipeline_version"] = "0.3.0-e3.2" if face_hands_enabled else "0.3.0-e3.1"
     blueprint["processing"]["config_hash"] = combined_config_hash
     blueprint["processing"]["stages"] = [
         {
@@ -264,6 +345,16 @@ def run_real_media_pipeline(
                 else "RTMPose is not configured; E3.1 pose estimation intentionally skipped"
             ),
         },
+        {
+            "name": "face_hands_2d",
+            "status": "succeeded" if face_hands_enabled else "skipped",
+            "progress": 1.0 if face_hands_enabled else 0.0,
+            "message": (
+                f"Pinned MediaPipe VIDEO tasks refined {len(blueprint['characters'])} anonymous track(s)"
+                if face_hands_enabled
+                else "MediaPipe Face/Hand task artifacts are not configured; E3.2 intentionally skipped"
+            ),
+        },
     ]
     blueprint["extensions"]["e2_shot_detection"] = {
         "backend": "pyscenedetect_content_detector",
@@ -286,6 +377,20 @@ def run_real_media_pipeline(
         "skeleton": "coco17" if pose_enabled else None,
         "keypoint_count": 17 if pose_enabled else 0,
         "character_count": len(blueprint["characters"]) if pose_enabled else 0,
+        "identity_inference_performed": False,
+        "biometric_embedding_exported": False,
+    }
+    blueprint["extensions"]["e3_face_hands_2d"] = {
+        "enabled": face_hands_enabled,
+        "estimator": "mediapipe_face_hand_landmarker_video" if face_hands_enabled else None,
+        "face_landmark_count": 478 if face_hands_enabled else 0,
+        "hand_landmark_count": 21 if face_hands_enabled else 0,
+        "character_count": len(blueprint["characters"]) if face_hands_enabled else 0,
+        "face_task_sha256": face_hand_refiner.face_task_sha256 if face_hand_refiner is not None else None,
+        "hand_task_sha256": face_hand_refiner.hand_task_sha256 if face_hand_refiner is not None else None,
+        "blendshapes_exported": False,
+        "facial_transformation_matrices_exported": False,
+        "hand_world_landmarks_exported": False,
         "identity_inference_performed": False,
         "biometric_embedding_exported": False,
     }
@@ -332,6 +437,13 @@ def run_real_media_pipeline(
     if pose_estimator is not None:
         provenance_tools.append(
             pose_estimator.provenance(
+                code_commit=os.environ.get("GITHUB_SHA"),
+                config_hash=combined_config_hash,
+            )
+        )
+    if face_hand_refiner is not None:
+        provenance_tools.append(
+            face_hand_refiner.provenance(
                 code_commit=os.environ.get("GITHUB_SHA"),
                 config_hash=combined_config_hash,
             )

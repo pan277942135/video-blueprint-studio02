@@ -1,0 +1,78 @@
+status: approved
+reviewed_on: 2026-08-13
+scope: E3.2 anonymous face and hands geometric refinement only
+runtime_candidate:
+  package: mediapipe
+  version: 0.10.35
+  source: https://pypi.org/project/mediapipe/0.10.35/
+  inference_mode: VIDEO
+  offline_first: true
+  runtime_downloads_allowed: false
+  fallback_model_allowed: false
+privacy:
+  face_recognition: false
+  identity_embeddings: false
+  identity_inference: false
+  cross_video_identity_association: false
+  sensitive_attribute_inference: false
+face:
+  upstream_url: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+  filename: face_landmarker.task
+  size_bytes: 3758596
+  sha256: 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff
+  etag: '"b0e7274907a1644404fef66b28dd6d85"'
+  x_goog_generation: '1683136941468629'
+  x_goog_metageneration: '1'
+  approved_outputs:
+    - face_landmarks_2d_pixel_xy
+  disabled_outputs:
+    - blendshapes
+    - facial_transformation_matrices
+    - identity_or_embedding_outputs
+hand:
+  upstream_url: https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+  filename: hand_landmarker.task
+  size_bytes: 7819105
+  sha256: fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1
+  etag: '"15318430ea3851670fe9914116a9cfad"'
+  x_goog_generation: '1682480005356399'
+  x_goog_metageneration: '1'
+  approved_outputs:
+    - hand_landmarks_2d_pixel_xy
+    - handedness_for_geometric_association_only
+  disabled_outputs:
+    - world_landmarks_until_coordinate_semantics_are_extended
+    - identity_or_embedding_outputs
+evidence:
+  bootstrap:
+    workflow: E3.2 MediaPipe Artifact Bootstrap
+    run_id: 31695829922
+    artifact_id: 9179252529
+    artifact_zip_sha256: 585bf2fb0976e97239645377298435fd75a299750956a05850f98929dd084d2c
+    inference_executed: false
+  runtime_certification:
+    workflow: E3.2 MediaPipe Certification
+    run_id: 31699831834
+    run_number: 12
+    head_sha: db103a3ff23993688e1c4a76416176f0f6aca18e
+    artifact_id: 9180802902
+    artifact_zip_sha256: e45c3cc5c65fdaee85f29c9829c4cac1ecb7e6ffad7960de0c1bd35efafbd452
+    inference_executed: true
+    passed: true
+    video_frame_count: 6
+    face_detected_frames: 6
+    hand_detected_frames:
+      left: 1
+      right: 6
+    face_landmark_count: 478
+    hand_landmark_count: 21
+    face_3d_exported: false
+    blendshapes_exported: false
+    facial_transform_exported: false
+    hand_world_landmarks_exported: false
+approval:
+  project_owner_approved: true
+  approved_by: pan277942135
+  approved_on: 2026-08-13
+  approval_required_before_real_inference: true
+  approved_scope: pinned MediaPipe 0.10.35 FaceLandmarker and HandLandmarker artifacts above only
