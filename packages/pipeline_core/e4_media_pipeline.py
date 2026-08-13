@@ -16,7 +16,7 @@ from packages.pipeline_core.rtmdet_ins_mask_backend import RTMDetInsPersonMaskSe
 
 def _extended_hash(current: str, segmenter: PersonMaskSegmenter) -> str:
     token = getattr(segmenter, "config_sha256", type(segmenter).__name__)
-    return hashlib.sha256(f"{current}|person-mask:{token}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{current}|person-mask:{token}".encode()).hexdigest()
 
 
 def run_e4_media_pipeline(
