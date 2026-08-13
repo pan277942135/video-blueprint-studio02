@@ -1,0 +1,112 @@
+name: E3.2 MediaPipe Artifact Bootstrap
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - "docs/model-candidates/E3.2-mediapipe-face-hands.md"
+      - ".github/workflows/e3-2-mediapipe-artifact-bootstrap.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  artifact-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download official Google MediaPipe task bundles without inference
+        run: |
+          set -euo pipefail
+          mkdir -p .cert
+          FACE_URL="https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task"
+          HAND_URL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
+          printf '%s\n' "$FACE_URL" > .cert/face_url.txt
+          printf '%s\n' "$HAND_URL" > .cert/hand_url.txt
+          curl --fail --location --retry 3 --dump-header .cert/face_headers.txt \
+            --output .cert/face_landmarker.task "$FACE_URL"
+          curl --fail --location --retry 3 --dump-header .cert/hand_headers.txt \
+            --output .cert/hand_landmarker.task "$HAND_URL"
+          test -s .cert/face_landmarker.task
+          test -s .cert/hand_landmarker.task
+
+      - name: Compute byte-exact artifact evidence
+        run: |
+          set -euo pipefail
+          sha256sum .cert/face_landmarker.task | tee .cert/face_landmarker.sha256
+          sha256sum .cert/hand_landmarker.task | tee .cert/hand_landmarker.sha256
+          stat --printf='%s\n' .cert/face_landmarker.task | tee .cert/face_landmarker.size
+          stat --printf='%s\n' .cert/hand_landmarker.task | tee .cert/hand_landmarker.size
+          file .cert/face_landmarker.task | tee .cert/face_landmarker.filetype
+          file .cert/hand_landmarker.task | tee .cert/hand_landmarker.filetype
+
+      - name: Build immutable evidence summary
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('.cert')
+
+          def digest(path: Path) -> str:
+              h = hashlib.sha256()
+              with path.open('rb') as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          def selected_headers(path: Path) -> dict[str, str]:
+              keep = {'etag', 'last-modified', 'x-goog-generation', 'x-goog-metageneration'}
+              result = {}
+              for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+                  if ':' not in line:
+                      continue
+                  key, value = line.split(':', 1)
+                  key = key.strip().lower()
+                  if key in keep:
+                      result[key] = value.strip()
+              return result
+
+          evidence = {
+              'status': 'hash_only_no_inference',
+              'face': {
+                  'url': (root / 'face_url.txt').read_text(encoding='utf-8').strip(),
+                  'filename': 'face_landmarker.task',
+                  'size_bytes': (root / 'face_landmarker.task').stat().st_size,
+                  'sha256': digest(root / 'face_landmarker.task'),
+                  'response_headers': selected_headers(root / 'face_headers.txt'),
+              },
+              'hand': {
+                  'url': (root / 'hand_url.txt').read_text(encoding='utf-8').strip(),
+                  'filename': 'hand_landmarker.task',
+                  'size_bytes': (root / 'hand_landmarker.task').stat().st_size,
+                  'sha256': digest(root / 'hand_landmarker.task'),
+                  'response_headers': selected_headers(root / 'hand_headers.txt'),
+              },
+              'inference_executed': False,
+          }
+          (root / 'mediapipe_artifact_evidence.json').write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(evidence, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload hash-only evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: e3-2-mediapipe-artifact-bootstrap
+          path: |
+            .cert/face_url.txt
+            .cert/hand_url.txt
+            .cert/face_headers.txt
+            .cert/hand_headers.txt
+            .cert/face_landmarker.sha256
+            .cert/hand_landmarker.sha256
+            .cert/face_landmarker.size
+            .cert/hand_landmarker.size
+            .cert/mediapipe_artifact_evidence.json
+          if-no-files-found: error
