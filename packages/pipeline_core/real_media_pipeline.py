@@ -6,12 +6,35 @@ from typing import Any
 
 from packages.pipeline_core.media_probe import InvalidMediaError
 from packages.pipeline_core.mock_pipeline import run_deterministic_mock_pipeline
+from packages.pipeline_core.person_tracking import PersonTrackingConfig, run_person_tracking
+from packages.pipeline_core.rtmdet_backend import RTMDetPersonDetector
 from packages.pipeline_core.shot_detection import ShotDetectionConfig, ShotDetectionError, detect_shots
 
 
-def _config_hash(config: ShotDetectionConfig) -> str:
+def _shot_config_hash(config: ShotDetectionConfig) -> str:
     payload = f"shots:content-detector:{config.threshold}:{config.min_scene_len_frames}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _combined_config_hash(
+    shot_config: ShotDetectionConfig,
+    tracking_config: PersonTrackingConfig | None = None,
+    detector: RTMDetPersonDetector | None = None,
+) -> str:
+    parts = [
+        f"shots:{shot_config.threshold}:{shot_config.min_scene_len_frames}",
+    ]
+    if tracking_config is not None:
+        parts.append(f"tracking:{tracking_config.iou_threshold}:{tracking_config.max_gap_frames}")
+    if detector is not None:
+        parts.extend(
+            [
+                f"rtmdet-config:{detector.config_sha256}",
+                f"rtmdet-weights:{detector.weights_sha256}",
+                f"rtmdet-threshold:{detector.config.score_threshold}",
+            ]
+        )
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
 def _package_version(package_name: str) -> str:
@@ -32,13 +55,14 @@ def run_real_media_pipeline(
     video_sha256: str,
     video_path: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run the real-media pipeline through E2.1 shot detection.
+    """Run the real-media pipeline through E2 shot/people analysis.
 
-    E1 provides real source probing, normalization, and PTS mapping. E2.1
-    replaces the previous single-shot scaffold with real PySceneDetect scene
-    boundaries and real keyframe PNG artifacts extracted from the normalized
-    CFR analysis video. Missing media, incomplete normalized artifacts, or shot
-    detection failures are hard failures and never fall back to demo output.
+    E1 provides real source probing, normalization, and PTS mapping. E2.1 runs
+    real PySceneDetect shot detection unconditionally. E2.2 runs RTMDet person
+    detection and anonymous IoU track association only when a complete,
+    explicitly approved local RTMDet configuration is present. Partial or
+    unapproved model configuration is a hard failure; no detector fallback is
+    allowed.
     """
     if not video_path:
         raise InvalidMediaError("Real-media analysis requires a persisted uploaded video path")
@@ -54,11 +78,10 @@ def run_real_media_pipeline(
 
     normalized_path = sidecars.get("artifacts/normalized/analysis_cfr.mp4")
     if not isinstance(normalized_path, (str, os.PathLike)) or not os.path.isfile(str(normalized_path)):
-        raise ShotDetectionError("Normalized CFR analysis video is required before E2 shot detection")
+        raise ShotDetectionError("Normalized CFR analysis video is required before E2 analysis")
 
     timebase = blueprint["timebase"]
-    config = ShotDetectionConfig()
-    config_hash = _config_hash(config)
+    shot_config = ShotDetectionConfig()
     artifact_root = os.path.join(os.path.dirname(video_path), f"vbs_artifacts_{job_id}")
     shots, shot_sidecars = detect_shots(
         str(normalized_path),
@@ -66,23 +89,49 @@ def run_real_media_pipeline(
         fps_num=int(timebase["fps_num"]),
         fps_den=int(timebase["fps_den"]),
         output_dir=artifact_root,
-        config=config,
+        config=shot_config,
     )
     sidecars.update(shot_sidecars)
     blueprint["shots"] = shots
 
-    report_uri = "artifacts/reports/shot_detection.json"
-    shot_report = shot_sidecars.get(report_uri)
+    shot_report_uri = "artifacts/reports/shot_detection.json"
+    shot_report = shot_sidecars.get(shot_report_uri)
     if not isinstance(shot_report, dict):
         raise ShotDetectionError("Shot detector did not emit its required provenance report")
     blueprint["artifacts"]["reports"] = [
         {
             "kind": "shot_detection",
-            "uri": report_uri,
+            "uri": shot_report_uri,
             "sha256": _json_sha256(shot_report),
             "mime_type": "application/json",
         }
     ]
+
+    detector = RTMDetPersonDetector.from_environment()
+    tracking_config: PersonTrackingConfig | None = None
+    people_enabled = detector is not None
+    people_score = 0.0
+    if detector is not None:
+        tracking_config = PersonTrackingConfig()
+        characters, tracking_sidecars, overlays, tracking_report_ref = run_person_tracking(
+            str(normalized_path),
+            shots=shots,
+            frame_count=int(timebase["frame_count"]),
+            detector=detector,
+            output_dir=artifact_root,
+            config=tracking_config,
+        )
+        sidecars.update(tracking_sidecars)
+        blueprint["characters"] = characters
+        blueprint["artifacts"]["overlays"] = overlays
+        blueprint["artifacts"]["reports"].append(tracking_report_ref)
+        people_score = min(
+            (float(character["quality"]["score"]) for character in characters),
+            default=1.0,
+        )
+    else:
+        blueprint["characters"] = []
+        blueprint["artifacts"]["overlays"] = []
 
     # Camera/environment analysis belongs to later Epics. Remove E0 placeholder
     # confidence claims from the real-media path rather than presenting mock
@@ -113,20 +162,23 @@ def run_real_media_pipeline(
     }
 
     shot_score = min((float(shot["quality"]["score"]) for shot in shots), default=0.0)
-    blueprint["quality"]["overall_score"] = shot_score
+    blueprint["quality"]["overall_score"] = min(shot_score, people_score) if people_enabled else shot_score
     blueprint["quality"]["module_scores"] = {
         "media": 1.0,
         "shots": shot_score,
-        "people": 0.0,
+        "people": people_score,
         "camera": 0.0,
         "environment": 0.0,
     }
-    blueprint["quality"]["warnings"] = [
-        "E2.1 includes real shot detection; person detection/tracking is not yet enabled",
-    ]
+    blueprint["quality"]["warnings"] = []
+    if not people_enabled:
+        blueprint["quality"]["warnings"].append(
+            "E2.2 RTMDet person tracking is disabled until approved local model configuration is supplied"
+        )
 
-    blueprint["processing"]["pipeline_version"] = "0.2.0-e2.1"
-    blueprint["processing"]["config_hash"] = config_hash
+    combined_config_hash = _combined_config_hash(shot_config, tracking_config, detector)
+    blueprint["processing"]["pipeline_version"] = "0.2.1-e2.2"
+    blueprint["processing"]["config_hash"] = combined_config_hash
     blueprint["processing"]["stages"] = [
         {
             "name": "media_probe_normalize",
@@ -142,26 +194,40 @@ def run_real_media_pipeline(
         },
         {
             "name": "person_detection_tracking",
-            "status": "skipped",
-            "progress": 0.0,
-            "message": "Scheduled for E2.2 RTMDet + anonymous track association",
+            "status": "succeeded" if people_enabled else "skipped",
+            "progress": 1.0 if people_enabled else 0.0,
+            "message": (
+                f"RTMDet + anonymous IoU association produced {len(blueprint['characters'])} track(s)"
+                if people_enabled
+                else "RTMDet is not configured; person tracking intentionally skipped"
+            ),
         },
     ]
     blueprint["extensions"]["e2_shot_detection"] = {
         "backend": "pyscenedetect_content_detector",
-        "threshold": config.threshold,
-        "min_scene_len_frames": config.min_scene_len_frames,
+        "threshold": shot_config.threshold,
+        "min_scene_len_frames": shot_config.min_scene_len_frames,
         "shot_count": len(shots),
-        "report_uri": report_uri,
+        "report_uri": shot_report_uri,
     }
-    blueprint["provenance"]["tools"] = [
+    blueprint["extensions"]["e2_person_tracking"] = {
+        "enabled": people_enabled,
+        "detector": "mmdetection_rtmdet" if people_enabled else None,
+        "association": "anonymous_iou" if people_enabled else None,
+        "character_count": len(blueprint["characters"]),
+        "identity_inference_performed": False,
+        "biometric_embedding_exported": False,
+    }
+
+    shot_config_hash = _shot_config_hash(shot_config)
+    provenance_tools = [
         {
             "module": "shot_detection",
             "tool": "PySceneDetect ContentDetector",
             "version": _package_version("scenedetect"),
             "code_commit": os.environ.get("GITHUB_SHA"),
             "weights_sha256": None,
-            "config_hash": config_hash,
+            "config_hash": shot_config_hash,
             "license": "BSD-3-Clause",
         },
         {
@@ -170,9 +236,28 @@ def run_real_media_pipeline(
             "version": _package_version("opencv-python-headless"),
             "code_commit": os.environ.get("GITHUB_SHA"),
             "weights_sha256": None,
-            "config_hash": config_hash,
+            "config_hash": shot_config_hash,
             "license": "Apache-2.0",
         },
     ]
+    if detector is not None and tracking_config is not None:
+        provenance_tools.extend(
+            [
+                detector.provenance(
+                    code_commit=os.environ.get("GITHUB_SHA"),
+                    config_hash=combined_config_hash,
+                ),
+                {
+                    "module": "person_tracking",
+                    "tool": "Video Blueprint anonymous IoU tracker",
+                    "version": "0.2.1",
+                    "code_commit": os.environ.get("GITHUB_SHA"),
+                    "weights_sha256": None,
+                    "config_hash": combined_config_hash,
+                    "license": "project-internal",
+                },
+            ]
+        )
+    blueprint["provenance"]["tools"] = provenance_tools
 
     return blueprint, sidecars

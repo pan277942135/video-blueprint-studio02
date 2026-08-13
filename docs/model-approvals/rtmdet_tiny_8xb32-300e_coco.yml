@@ -1,0 +1,32 @@
+model: rtmdet_tiny_8xb32-300e_coco
+approval:
+  status: approved
+  approved_by: project_user
+  approved_at: "2026-08-13"
+  scope: "E2.2 person detection and anonymous tracking certification/runtime"
+upstream:
+  repository: "https://github.com/open-mmlab/mmdetection"
+  model_index: "configs/rtmdet/metafile.yml"
+  config: "configs/rtmdet/rtmdet_tiny_8xb32-300e_coco.py"
+  weights_url: "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_tiny_8xb32-300e_coco/rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth"
+integrity:
+  publisher_filename_sha256_prefix: "78e30dcc"
+  verified_sha256: "78e30dcce0c6f594eaff0d6977b84b4103688b4aff0ad1aa16008a8cc854a7fb"
+  verification_status: "certified_official_download"
+certification:
+  status: passed
+  workflow_run_id: 31687944292
+  pipeline_version: "0.2.1-e2.2"
+  max_person_score: 0.827391
+  character_count: 5
+  shot_count: 1
+  overlay_count: 5
+  identity_inference_performed: false
+  biometric_embedding_exported: false
+license_record:
+  runtime_code: "MMDetection Apache-2.0"
+  rtmdet_deployment_basis: "OpenMMLab maintainer guidance: RTMDet deployment is Apache-2.0"
+  checkpoint_note: "OpenMMLab model-zoo checkpoint licensing clarification remains open; use is explicitly approved by the project user for this project."
+privacy:
+  identity_inference_performed: false
+  biometric_embedding_exported: false
