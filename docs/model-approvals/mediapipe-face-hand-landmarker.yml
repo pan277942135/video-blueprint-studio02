@@ -1,4 +1,4 @@
-status: pending_project_owner_approval
+status: approved
 reviewed_on: 2026-08-13
 scope: E3.2 anonymous face and hands geometric refinement only
 runtime_candidate:
@@ -50,5 +50,8 @@ evidence:
   artifact_zip_sha256: 585bf2fb0976e97239645377298435fd75a299750956a05850f98929dd084d2c
   inference_executed: false
 approval:
-  project_owner_approved: false
+  project_owner_approved: true
+  approved_by: pan277942135
+  approved_on: 2026-08-13
   approval_required_before_real_inference: true
+  approved_scope: pinned MediaPipe 0.10.35 FaceLandmarker and HandLandmarker artifacts above only
