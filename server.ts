@@ -494,8 +494,14 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    // Express 5/path-to-regexp no longer accepts the legacy `*` route pattern.
+    // Use an unpathed middleware fallback so SPA navigation remains compatible
+    // without intercepting unmatched /api requests handled above.
+    app.use((req, res, next) => {
+      if (req.method !== 'GET') {
+        return next();
+      }
+      return res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
