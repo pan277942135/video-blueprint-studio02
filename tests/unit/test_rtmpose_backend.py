@@ -1,3 +1,4 @@
+import hashlib
 from types import SimpleNamespace
 
 import numpy as np
@@ -20,11 +21,62 @@ def test_rtmpose_requires_explicit_weight_approval(tmp_path):
         config_path=str(config_path),
         checkpoint_path=str(checkpoint_path),
         weights_license="TEST-ONLY",
+        expected_weights_sha256=hashlib.sha256(b"approved-pose-weights").hexdigest(),
     )
     with pytest.raises(RTMPoseConfigurationError, match="explicitly approved"):
         RTMPosePoseEstimator(
             config,
             weights_approved=False,
+            init_model_fn=lambda *args, **kwargs: object(),
+            inference_topdown_fn=lambda *args, **kwargs: [],
+        )
+
+
+def test_rtmpose_rejects_checkpoint_sha256_mismatch_before_model_init(tmp_path):
+    config_path = tmp_path / "pose.py"
+    checkpoint_path = tmp_path / "pose.pth"
+    config_path.write_text("model = {}\n", encoding="utf-8")
+    checkpoint_path.write_bytes(b"actual-pose-weights")
+    init_called = False
+
+    def init_model(*args, **kwargs):
+        nonlocal init_called
+        init_called = True
+        return object()
+
+    config = RTMPoseBackendConfig(
+        config_path=str(config_path),
+        checkpoint_path=str(checkpoint_path),
+        weights_license="TEST-ONLY",
+        expected_weights_sha256="0" * 64,
+    )
+    with pytest.raises(RTMPoseConfigurationError, match="checkpoint SHA256 mismatch"):
+        RTMPosePoseEstimator(
+            config,
+            weights_approved=True,
+            init_model_fn=init_model,
+            inference_topdown_fn=lambda *args, **kwargs: [],
+        )
+
+    assert init_called is False
+
+
+def test_rtmpose_rejects_malformed_expected_sha256(tmp_path):
+    config_path = tmp_path / "pose.py"
+    checkpoint_path = tmp_path / "pose.pth"
+    config_path.write_text("model = {}\n", encoding="utf-8")
+    checkpoint_path.write_bytes(b"actual-pose-weights")
+
+    config = RTMPoseBackendConfig(
+        config_path=str(config_path),
+        checkpoint_path=str(checkpoint_path),
+        weights_license="TEST-ONLY",
+        expected_weights_sha256="not-a-sha256",
+    )
+    with pytest.raises(RTMPoseConfigurationError, match="64 hexadecimal"):
+        RTMPosePoseEstimator(
+            config,
+            weights_approved=True,
             init_model_fn=lambda *args, **kwargs: object(),
             inference_topdown_fn=lambda *args, **kwargs: [],
         )
@@ -68,6 +120,7 @@ def test_rtmpose_environment_requires_complete_configuration(monkeypatch):
     monkeypatch.setenv("VBS_RTMPOSE_CONFIG", "/tmp/pose.py")
     monkeypatch.delenv("VBS_RTMPOSE_CHECKPOINT", raising=False)
     monkeypatch.delenv("VBS_RTMPOSE_WEIGHTS_LICENSE", raising=False)
+    monkeypatch.delenv("VBS_RTMPOSE_EXPECTED_SHA256", raising=False)
     monkeypatch.delenv("VBS_RTMPOSE_WEIGHTS_APPROVED", raising=False)
 
     with pytest.raises(RTMPoseConfigurationError, match="Incomplete RTMPose configuration"):
