@@ -12,7 +12,17 @@ upstream:
 integrity:
   publisher_filename_sha256_prefix: "78e30dcc"
   verified_sha256: "78e30dcce0c6f594eaff0d6977b84b4103688b4aff0ad1aa16008a8cc854a7fb"
-  verification_status: "official_download_verified"
+  verification_status: "certified_official_download"
+certification:
+  status: passed
+  workflow_run_id: 31687944292
+  pipeline_version: "0.2.1-e2.2"
+  max_person_score: 0.827391
+  character_count: 5
+  shot_count: 1
+  overlay_count: 5
+  identity_inference_performed: false
+  biometric_embedding_exported: false
 license_record:
   runtime_code: "MMDetection Apache-2.0"
   rtmdet_deployment_basis: "OpenMMLab maintainer guidance: RTMDet deployment is Apache-2.0"
