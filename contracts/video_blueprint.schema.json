@@ -915,6 +915,16 @@
             }
           ]
         },
+        "landmarks_2d_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeSeriesRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "landmarks_3d_ref": {
           "anyOf": [
             {
