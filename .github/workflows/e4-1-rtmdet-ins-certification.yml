@@ -1,0 +1,143 @@
+name: E4.1 RTMDet-Ins Certification
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - "packages/pipeline_core/binary_rle.py"
+      - "packages/pipeline_core/person_mask.py"
+      - "packages/pipeline_core/person_mask_core.py"
+      - "packages/pipeline_core/e4_media_pipeline.py"
+      - "packages/pipeline_core/rtmdet_ins_mask_backend.py"
+      - "scripts/certify_rtmdet_ins_e4_1.py"
+      - "docs/model-approvals/E4.1-rtmdet-ins-tiny.json"
+      - ".github/workflows/e4-1-rtmdet-ins-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rtmdet-ins-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg and approved OpenMMLab runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install "numpy==1.26.4" "opencv-python==4.10.0.84"
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.1.0 torchvision==0.16.0
+          pip install "mmengine>=0.7.1,<1.0.0"
+          pip install "mmcv==2.1.0" -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html
+          pip install "mmdet==3.3.0"
+          pip install "jsonschema>=4.18.0" "scenedetect>=0.6.7,<0.7"
+          pip install -e . --no-deps
+          python - <<'PY'
+          import mmdet, numpy
+          assert mmdet.__version__ == '3.3.0', mmdet.__version__
+          assert numpy.__version__ == '1.26.4', numpy.__version__
+          print('mmdet', mmdet.__version__, 'numpy', numpy.__version__)
+          PY
+
+      - name: Resolve installed detector and instance-segmentation configs
+        run: |
+          mkdir -p .cert
+          python - <<'PY'
+          import pathlib, mmdet
+          root = pathlib.Path(mmdet.__file__).resolve().parent / '.mim' / 'configs' / 'rtmdet'
+          detector = root / 'rtmdet_tiny_8xb32-300e_coco.py'
+          mask = root / 'rtmdet-ins_tiny_8xb32-300e_coco.py'
+          for path in (detector, mask):
+              if not path.is_file():
+                  raise SystemExit(f'config not found: {path}')
+          pathlib.Path('.cert/det_config.txt').write_text(str(detector))
+          pathlib.Path('.cert/mask_config.txt').write_text(str(mask))
+          print(detector)
+          print(mask)
+          PY
+
+      - name: Download and verify exact approved checkpoints
+        run: |
+          set -euo pipefail
+          DET_SHA=78e30dcce0c6f594eaff0d6977b84b4103688b4aff0ad1aa16008a8cc854a7fb
+          MASK_SHA=ec670f7ee9e20bd7931e15f15b7016f7fe531baaab81f2e6153382d046111885
+          curl --fail --location --retry 3 -o .cert/rtmdet_tiny.pth \
+            https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_tiny_8xb32-300e_coco/rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth
+          curl --fail --location --retry 3 -o .cert/rtmdet_ins_tiny.pth \
+            https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth
+          sha256sum .cert/rtmdet_tiny.pth | tee .cert/detector.sha256
+          sha256sum .cert/rtmdet_ins_tiny.pth | tee .cert/mask.sha256
+          test "$(cut -d' ' -f1 .cert/detector.sha256)" = "$DET_SHA"
+          test "$(cut -d' ' -f1 .cert/mask.sha256)" = "$MASK_SHA"
+
+      - name: Download official OpenMMLab human sample
+        run: |
+          curl --fail --location --retry 3 -o .cert/person.jpg \
+            https://raw.githubusercontent.com/open-mmlab/mmpose/main/tests/data/coco/000000197388.jpg
+          test -s .cert/person.jpg
+
+      - name: Validate real instance-mask signal directly
+        run: |
+          python - <<'PY'
+          import cv2
+          import numpy as np
+          from mmdet.apis import inference_detector, init_detector
+          config = open('.cert/mask_config.txt', encoding='utf-8').read().strip()
+          model = init_detector(config, '.cert/rtmdet_ins_tiny.pth', device='cpu')
+          image = cv2.imread('.cert/person.jpg')
+          if image is None:
+              raise SystemExit('could not decode official human sample')
+          result = inference_detector(model, image)
+          instances = result.pred_instances
+          labels = instances.labels.detach().cpu().numpy()
+          scores = instances.scores.detach().cpu().numpy()
+          masks = instances.masks.detach().cpu().numpy()
+          candidates = [(float(s), np.asarray(m, dtype=bool)) for l, s, m in zip(labels, scores, masks) if int(l) == 0]
+          score, mask = max(candidates, key=lambda item: item[0], default=(0.0, np.zeros(image.shape[:2], dtype=bool)))
+          print(f'person_mask_score={score:.6f} area={int(mask.sum())} image_shape={image.shape[:2]} mask_shape={mask.shape}')
+          if score < 0.30 or mask.shape != image.shape[:2] or not mask.any():
+              raise SystemExit('approved RTMDet-Ins did not produce a certifiable person mask')
+          PY
+
+      - name: Build deterministic real-media certification video
+        run: |
+          ffmpeg -hide_banner -loglevel error -loop 1 -i .cert/person.jpg -t 1.5 -r 4 \
+            -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -c:v libx264 -pix_fmt yuv420p \
+            -movflags +faststart .cert/person_mask_smoke.mp4
+
+      - name: Run E2-to-E4.1 end-to-end certification
+        run: |
+          python scripts/certify_rtmdet_ins_e4_1.py \
+            --video .cert/person_mask_smoke.mp4 \
+            --det-config "$(cat .cert/det_config.txt)" \
+            --det-checkpoint .cert/rtmdet_tiny.pth \
+            --mask-config "$(cat .cert/mask_config.txt)" \
+            --mask-checkpoint .cert/rtmdet_ins_tiny.pth \
+            --output .cert/e4_1_rtmdet_ins_certification.json
+
+      - name: Show certification evidence
+        if: always()
+        run: |
+          cat .cert/detector.sha256 || true
+          cat .cert/mask.sha256 || true
+          cat .cert/e4_1_rtmdet_ins_certification.json || true
+
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e4-1-rtmdet-ins-certification
+          path: |
+            .cert/detector.sha256
+            .cert/mask.sha256
+            .cert/e4_1_rtmdet_ins_certification.json
+          if-no-files-found: warn
