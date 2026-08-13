@@ -129,12 +129,14 @@ jobs:
           rtmdet_config = open('.cert/rtmdet_config_path.txt', encoding='utf-8').read().strip()
           rtmpose_config = open('.cert/rtmpose_config_path.txt', encoding='utf-8').read().strip()
           detector = init_detector(rtmdet_config, '.cert/rtmdet_tiny.pth', device='cpu')
-          pose_model = init_model(rtmpose_config, '.cert/rtmpose_tiny.pth', device='cpu')
 
           image = cv2.imread('.cert/person.jpg')
           if image is None:
               raise SystemExit('could not decode official OpenMMLab human sample')
 
+          # Match the production pipeline ordering exactly: MMDetection performs
+          # detection first, then MMPose is initialized for top-down pose. This
+          # avoids cross-framework MMEngine DefaultScope contamination.
           detection = inference_detector(detector, image)
           instances = detection.pred_instances
           labels = instances.labels.detach().cpu().numpy()
@@ -147,6 +149,7 @@ jobs:
           person_bbox = np.asarray([bboxes[best_index]], dtype=np.float32)
           detector_score = float(scores[best_index])
 
+          pose_model = init_model(rtmpose_config, '.cert/rtmpose_tiny.pth', device='cpu')
           result = inference_topdown(pose_model, image, bboxes=person_bbox)
           if len(result) != 1:
               raise SystemExit(f'expected one top-down pose result, got {len(result)}')
