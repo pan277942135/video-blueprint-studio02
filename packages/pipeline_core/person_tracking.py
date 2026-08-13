@@ -411,6 +411,7 @@ def _character_manifest(
             "enabled": False,
             "landmark_count": 0,
             "bbox_ref": None,
+            "landmarks_2d_ref": None,
             "landmarks_3d_ref": None,
             "blendshapes_ref": None,
             "transform_ref": None,
