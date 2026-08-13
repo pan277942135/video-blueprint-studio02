@@ -525,12 +525,19 @@ def run_face_hand_refinement(
     report_characters: list[dict[str, Any]] = []
     for character in characters:
         character_id = str(character["character_id"])
-        uri, path, checksum = _write_character_sidecar(
-            character_id,
-            arrays=arrays_by_character[character_id],
-            output_dir=output_dir,
+        has_observations = face_frames[character_id] > 0 or any(
+            hand_frames[character_id][side] > 0 for side in ("left", "right")
         )
-        refinement_sidecars[uri] = path
+        uri = ""
+        checksum = ""
+        if has_observations:
+            uri, path, checksum = _write_character_sidecar(
+                character_id,
+                arrays=arrays_by_character[character_id],
+                output_dir=output_dir,
+            )
+            refinement_sidecars[uri] = path
+
         present_count = present_frames[character_id]
         character["face"] = _face_manifest(
             frame_count=frame_count,
