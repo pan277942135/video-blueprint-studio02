@@ -30,8 +30,10 @@ jobs:
       - name: Install system runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg libgles2
+          sudo apt-get install -y ffmpeg libegl1 libgles2 libgl1
+          ldconfig -p | grep 'libEGL.so.1'
           ldconfig -p | grep 'libGLESv2.so.2'
+          ldconfig -p | grep 'libGL.so.1'
 
       - name: Install approved MediaPipe runtime and project
         run: |
