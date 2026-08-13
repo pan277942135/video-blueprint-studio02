@@ -79,13 +79,42 @@ jobs:
           sha256sum .cert/rtmdet_tiny.pth | tee .cert/weights.sha256
           test "$(cut -d' ' -f1 .cert/weights.sha256)" = "$EXPECTED_SHA256"
 
-      - name: Download official MMDetection demo image and build a short real-media video
+      - name: Download official OpenMMLab human sample
         run: |
-          curl --fail --location --retry 3 --output .cert/demo.jpg \
-            https://raw.githubusercontent.com/open-mmlab/mmdetection/v3.3.0/demo/demo.jpg
-          # yuv420p/H.264 requires even dimensions; the upstream demo image is
-          # 640x427, so pad only the bottom edge by one pixel without resizing.
-          ffmpeg -hide_banner -loglevel error -loop 1 -i .cert/demo.jpg -t 1.5 -r 4 \
+          # MMDetection's generic demo image is dominated by cars/benches and is
+          # not a reliable person-class smoke input. MMPose's official COCO human
+          # sample is explicitly used by OpenMMLab for RTMDet->human-pose demos.
+          curl --fail --location --retry 3 --output .cert/person.jpg \
+            https://raw.githubusercontent.com/open-mmlab/mmpose/main/tests/data/coco/000000197388.jpg
+          test -s .cert/person.jpg
+
+      - name: Validate approved RTMDet person signal
+        run: |
+          CONFIG_PATH="$(cat .cert/config_path.txt)"
+          python - <<'PY'
+          import os
+          import cv2
+          from mmdet.apis import inference_detector, init_detector
+
+          config_path = open('.cert/config_path.txt', encoding='utf-8').read().strip()
+          model = init_detector(config_path, '.cert/rtmdet_tiny.pth', device='cpu')
+          image = cv2.imread('.cert/person.jpg')
+          if image is None:
+              raise SystemExit('could not decode official OpenMMLab human sample')
+          result = inference_detector(model, image)
+          instances = result.pred_instances
+          labels = instances.labels.detach().cpu().numpy()
+          scores = instances.scores.detach().cpu().numpy()
+          person_scores = [float(score) for label, score in zip(labels, scores) if int(label) == 0]
+          max_person_score = max(person_scores, default=0.0)
+          print(f'person_candidates={len(person_scores)} max_person_score={max_person_score:.6f}')
+          if max_person_score < 0.30:
+              raise SystemExit(f'approved RTMDet person signal below certification threshold: {max_person_score:.6f}')
+          PY
+
+      - name: Build a short real-media video from the human sample
+        run: |
+          ffmpeg -hide_banner -loglevel error -loop 1 -i .cert/person.jpg -t 1.5 -r 4 \
             -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" \
             -c:v libx264 -pix_fmt yuv420p -movflags +faststart .cert/person_smoke.mp4
           ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate \
