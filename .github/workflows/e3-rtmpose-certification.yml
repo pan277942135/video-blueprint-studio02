@@ -118,32 +118,48 @@ jobs:
             https://raw.githubusercontent.com/open-mmlab/mmpose/main/tests/data/coco/000000197388.jpg
           test -s .cert/person.jpg
 
-      - name: Validate approved RTMPose signal directly
+      - name: Validate approved RTMDet-to-RTMPose signal directly
         run: |
           python - <<'PY'
           import cv2
           import numpy as np
+          from mmdet.apis import inference_detector, init_detector
           from mmpose.apis import inference_topdown, init_model
 
-          config_path = open('.cert/rtmpose_config_path.txt', encoding='utf-8').read().strip()
-          model = init_model(config_path, '.cert/rtmpose_tiny.pth', device='cpu')
+          rtmdet_config = open('.cert/rtmdet_config_path.txt', encoding='utf-8').read().strip()
+          rtmpose_config = open('.cert/rtmpose_config_path.txt', encoding='utf-8').read().strip()
+          detector = init_detector(rtmdet_config, '.cert/rtmdet_tiny.pth', device='cpu')
+          pose_model = init_model(rtmpose_config, '.cert/rtmpose_tiny.pth', device='cpu')
+
           image = cv2.imread('.cert/person.jpg')
           if image is None:
               raise SystemExit('could not decode official OpenMMLab human sample')
-          height, width = image.shape[:2]
-          result = inference_topdown(
-              model,
-              image,
-              bboxes=np.asarray([[0.0, 0.0, float(width), float(height)]], dtype=np.float32),
-          )
+
+          detection = inference_detector(detector, image)
+          instances = detection.pred_instances
+          labels = instances.labels.detach().cpu().numpy()
+          scores = instances.scores.detach().cpu().numpy()
+          bboxes = instances.bboxes.detach().cpu().numpy()
+          person_indices = np.where((labels == 0) & (scores >= 0.30))[0]
+          if person_indices.size == 0:
+              raise SystemExit('approved RTMDet produced no person bbox >= 0.30 for RTMPose certification')
+          best_index = int(person_indices[np.argmax(scores[person_indices])])
+          person_bbox = np.asarray([bboxes[best_index]], dtype=np.float32)
+          detector_score = float(scores[best_index])
+
+          result = inference_topdown(pose_model, image, bboxes=person_bbox)
           if len(result) != 1:
               raise SystemExit(f'expected one top-down pose result, got {len(result)}')
-          scores = np.asarray(result[0].pred_instances.keypoint_scores, dtype=np.float32).reshape(-1)
-          if scores.shape != (17,):
-              raise SystemExit(f'expected COCO-17 confidence, got {scores.shape}')
-          mean_score = float(scores.mean())
-          min_score = float(scores.min())
-          print(f'keypoints=17 mean_score={mean_score:.6f} min_score={min_score:.6f}')
+          pose_scores = np.asarray(result[0].pred_instances.keypoint_scores, dtype=np.float32).reshape(-1)
+          if pose_scores.shape != (17,):
+              raise SystemExit(f'expected COCO-17 confidence, got {pose_scores.shape}')
+          mean_score = float(pose_scores.mean())
+          min_score = float(pose_scores.min())
+          print(
+              f'person_score={detector_score:.6f} keypoints=17 '
+              f'mean_score={mean_score:.6f} min_score={min_score:.6f} '
+              f'bbox={person_bbox.reshape(-1).tolist()}'
+          )
           if mean_score < 0.30:
               raise SystemExit(f'approved RTMPose signal below certification threshold: {mean_score:.6f}')
           PY
