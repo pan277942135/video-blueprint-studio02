@@ -87,9 +87,7 @@
           "image_uri": "artifacts/keyframes/shot_000_000000.png"
         }
       ],
-      "dominant_character_ids": [
-        "char_000"
-      ],
+      "dominant_character_ids": [],
       "camera_motion_id": "cam_000",
       "quality": {
         "score": 0.95,

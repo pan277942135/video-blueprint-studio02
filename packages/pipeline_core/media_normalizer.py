@@ -419,7 +419,11 @@ def normalize_media_to_cfr(
         raise NormalizationFailedError(f"FFmpeg produced empty or missing file at {normalized_video_path}")
 
     norm_probe_pre = probe_media(normalized_video_path)
-    frame_count = norm_probe_pre.source_frame_count or 1
+    if norm_probe_pre.source_frame_count is None or norm_probe_pre.source_frame_count < 1:
+        raise NormalizationFailedError(
+            f"FFmpeg normalization resulted in invalid frame_count: {norm_probe_pre.source_frame_count}"
+        )
+    frame_count = norm_probe_pre.source_frame_count
 
     pts_map_matrix, max_err_us, mean_err_us = generate_source_pts_map(
         norm_frame_count=frame_count,
@@ -470,3 +474,4 @@ def normalize_media_to_cfr(
         mapping_error_max_us=max_err_us,
         mapping_error_mean_us=mean_err_us
     )
+

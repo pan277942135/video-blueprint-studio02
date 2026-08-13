@@ -15,10 +15,11 @@ export interface VideoRecord {
   created_at: string;
   authorization_attested: boolean;
   adult_subject_attested: boolean;
+  file_path?: string;
 }
 
 export interface StageInfo {
-  stage_id: string;
+  stage_id?: string;
   name: string;
   status: StageStatus;
   progress: number;

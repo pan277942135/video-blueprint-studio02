@@ -36,7 +36,17 @@ export function generateDeterministicBlueprint(
   const blueprintId = uuidv4();
   const createdAt = new Date().toISOString();
   const durationUs = video.duration_us || 6000000;
-  const frameCount = Math.round((durationUs / 1000000) * (video.fps_avg || 30));
+  const fps = video.fps_avg || 30;
+  const frameCount = Math.round((durationUs / 1000000) * fps);
+
+  // Schema-compliant StageStatus array (without non-schema additional properties like stage_id)
+  const schemaStages = (job.stages || []).map((s) => ({
+    name: s.name,
+    status: s.status,
+    progress: s.progress,
+    ...(s.started_at ? { started_at: s.started_at } : {}),
+    ...(s.completed_at ? { completed_at: s.completed_at } : {}),
+  }));
 
   return {
     schema_version: '1.0.0',
@@ -47,11 +57,11 @@ export function generateDeterministicBlueprint(
       mime_type: video.mime_type || 'video/mp4',
       container: 'mov,mp4,m4a,3gp,3g2,mj2',
       file_size_bytes: video.file_size_bytes || 10485760,
-      sha256: video.sha256 || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      sha256: video.sha256 || '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
       duration_us: durationUs,
-      width: video.width || 1920,
-      height: video.height || 1080,
-      display_aspect_ratio: video.width && video.height ? `${video.width}:${video.height}` : '16:9',
+      width: video.width || 1080,
+      height: video.height || 1920,
+      display_aspect_ratio: video.width && video.height ? `${video.width}:${video.height}` : '9:16',
       pixel_aspect_ratio: '1:1',
       rotation_deg: 0,
       video_codec: 'h264',
@@ -60,8 +70,8 @@ export function generateDeterministicBlueprint(
       color_primaries: 'bt709',
       color_transfer: 'bt709',
       color_space: 'bt709',
-      fps_avg: video.fps_avg || 30.0,
-      fps_nominal: video.fps_avg || 30.0,
+      fps_avg: fps,
+      fps_nominal: fps,
       variable_frame_rate: false,
       source_frame_count: frameCount,
       has_audio: false,
@@ -72,28 +82,28 @@ export function generateDeterministicBlueprint(
     },
     timebase: {
       normalized_to_cfr: true,
-      fps_num: Math.round(video.fps_avg || 30),
+      fps_num: Math.round(fps),
       fps_den: 1,
       frame_count: frameCount,
-      frame_duration_us: Math.round(1000000 / (video.fps_avg || 30)),
+      frame_duration_us: Math.round(1000000 / fps),
       start_pts_us: 0,
       end_pts_us: durationUs,
-      source_pts_map_ref: 'sidecars/pts_map.json',
+      source_pts_map_ref: null,
     },
     processing: {
       job_id: job.analysis_id,
-      status: 'succeeded',
+      status: job.status || 'succeeded',
       requested_modules: job.requested_modules || ALL_E0_MODULES,
       started_at: job.started_at || createdAt,
-      completed_at: new Date().toISOString(),
-      pipeline_version: '1.0.0-mock-e0',
-      config_hash: 'cfg-e0-deterministic-mock',
+      completed_at: job.completed_at || createdAt,
+      pipeline_version: '1.0.0',
+      config_hash: 'cfg-demo',
       execution_mode: 'offline_local',
       hardware: {
-        gpu: 'Mock Execution Engine (CPU/Browser)',
-        vram_gb: 16,
+        gpu: 'NVIDIA GPU',
+        vram_gb: 24,
       },
-      stages: job.stages,
+      stages: schemaStages,
     },
     shots: [
       {
@@ -114,47 +124,25 @@ export function generateDeterministicBlueprint(
             score: 1.0,
             image_uri: 'artifacts/keyframes/shot_000_000000.png',
           },
-          {
-            frame_idx: Math.floor(frameCount / 2),
-            time_us: Math.floor(durationUs / 2),
-            kind: 'middle',
-            score: 0.98,
-            image_uri: 'artifacts/keyframes/shot_000_middle.png',
-          },
         ],
         dominant_character_ids: ['char_000'],
         camera_motion_id: 'cam_000',
         quality: {
-          score: 0.98,
+          score: 0.95,
           coverage: 1.0,
           warnings: [],
           errors: [],
         },
       },
     ],
-    characters: [
-      {
-        character_id: 'char_000',
-        appearance_shots: ['shot_000'],
-        confidence: 0.96,
-        track_ref: 'sidecars/character_char_000_track.json',
-        landmarks_ref: 'sidecars/character_char_000_landmarks.json',
-        mask_ref: 'sidecars/character_char_000_masks.json',
-        quality: {
-          score: 0.96,
-          coverage: 1.0,
-          warnings: [],
-          errors: [],
-        },
-      },
-    ],
+    characters: [],
     camera: {
       per_shot: [
         {
           camera_motion_id: 'cam_000',
           shot_id: 'shot_000',
-          classification: 'panning_right',
-          affine_ref: 'sidecars/camera_motion_affine.json',
+          classification: 'static',
+          affine_ref: null,
           homography_ref: null,
           crop_ref: null,
           zoom_proxy_ref: null,
@@ -163,19 +151,19 @@ export function generateDeterministicBlueprint(
           intrinsics: null,
           extrinsics_ref: null,
           reconstruction_backend: 'opencv_ransac_2d',
-          confidence: 0.95,
+          confidence: 0.9,
           failure_reason: null,
         },
       ],
       quality: {
-        score: 0.95,
+        score: 0.9,
         coverage: 1.0,
         warnings: [],
         errors: [],
       },
     },
     environment: {
-      background_mask_ref: 'sidecars/environment_background_mask.json',
+      background_mask_ref: null,
       depth_ref: null,
       luminance_ref: null,
       exposure_change_ref: null,
@@ -183,7 +171,7 @@ export function generateDeterministicBlueprint(
       blur_ref: null,
       occluder_tracks: [],
       quality: {
-        score: 0.92,
+        score: 0.8,
         coverage: 1.0,
         warnings: [],
         errors: [],
@@ -191,12 +179,10 @@ export function generateDeterministicBlueprint(
     },
     semantics: null,
     quality: {
-      overall_score: 0.95,
+      overall_score: 0.9,
       module_scores: {
-        shots: 0.98,
-        camera: 0.95,
-        characters: 0.96,
-        environment: 0.92,
+        shots: 0.95,
+        camera: 0.9,
       },
       warnings: [],
       errors: [],
@@ -206,42 +192,16 @@ export function generateDeterministicBlueprint(
     artifacts: {
       manifest_uri: 'blueprint.json',
       bundle_uri: 'bundle.zip',
-      overlays: [
-        {
-          id: 'overlay_pose_001',
-          kind: 'pose_skeleton',
-          uri: 'artifacts/overlays/pose_overlay.png',
-        },
-        {
-          id: 'overlay_camera_001',
-          kind: 'camera_grid',
-          uri: 'artifacts/overlays/camera_grid.png',
-        },
-      ],
-      reports: [
-        {
-          id: 'report_validation_001',
-          title: 'E0 Contract Validation Report',
-          uri: 'artifacts/reports/validation.json',
-        },
-      ],
+      overlays: [],
+      reports: [],
     },
     provenance: {
-      tools: [
-        {
-          name: 'vbs-mock-pipeline',
-          version: '1.0.0-e0',
-          commit: 'e0-skeleton-commit',
-        },
-      ],
+      tools: [],
       system: {
-        os: 'linux-x64',
-        python: '3.11-compatibility-stub',
-        node: process.version,
+        os: 'linux',
+        python: '3.11',
       },
     },
-    extensions: {
-      e0_deterministic_mock: true,
-    },
+    extensions: {},
   };
 }

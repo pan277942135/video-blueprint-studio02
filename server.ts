@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+import { execFileSync } from 'child_process';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import { createServer as createViteServer } from 'vite';
@@ -20,6 +22,8 @@ app.use(express.json());
 const videosStore = new Map<string, VideoRecord>();
 const jobsStore = new Map<string, AnalysisJob>();
 const blueprintsStore = new Map<string, any>();
+const bundlePathsStore = new Map<string, string>();
+const validationReportsStore = new Map<string, any>();
 const sseClients = new Map<string, express.Response[]>();
 
 // Configure multer for video upload
@@ -108,8 +112,34 @@ function runMockAnalysisPipelineAsync(jobId: string) {
 
       const video = videosStore.get(currentJob.video_id);
       if (video) {
-        const bp = generateDeterministicBlueprint(currentJob, video);
-        blueprintsStore.set(jobId, bp);
+        try {
+          const runOutput = execFileSync('python3', [
+            'scripts/run_pipeline_job.py',
+            jobId,
+            video.file_path || '',
+            video.file_name,
+            video.sha256
+          ], { encoding: 'utf-8' });
+
+          const runRes = JSON.parse(runOutput);
+          if (runRes.status === 'succeeded' && runRes.blueprint_path && fs.existsSync(runRes.blueprint_path)) {
+            const bpData = JSON.parse(fs.readFileSync(runRes.blueprint_path, 'utf-8'));
+            blueprintsStore.set(jobId, bpData);
+            if (runRes.bundle_path) {
+              bundlePathsStore.set(jobId, runRes.bundle_path);
+            }
+            if (runRes.validation_report_path && fs.existsSync(runRes.validation_report_path)) {
+              validationReportsStore.set(jobId, JSON.parse(fs.readFileSync(runRes.validation_report_path, 'utf-8')));
+            }
+          } else {
+            const bp = generateDeterministicBlueprint(currentJob, video);
+            blueprintsStore.set(jobId, bp);
+          }
+        } catch (err) {
+          console.error('Python pipeline execution error:', err);
+          const bp = generateDeterministicBlueprint(currentJob, video);
+          blueprintsStore.set(jobId, bp);
+        }
       }
 
       notifySseClients(jobId, currentJob);
@@ -134,21 +164,38 @@ app.post('/api/v1/videos', upload.single('file'), (req: express.Request, res: ex
   const file = req.file;
   const fileName = file ? file.originalname : req.body.file_name || 'source_video.mp4';
   const videoId = uuidv4();
+  let tempFilePath = '';
+
+  if (file) {
+    tempFilePath = path.join(os.tmpdir(), `vbs_upload_${videoId}_${fileName}`);
+    fs.writeFileSync(tempFilePath, file.buffer);
+  }
+
+  let probedData: any = {};
+  if (tempFilePath && fs.existsSync(tempFilePath)) {
+    try {
+      const probeOutput = execFileSync('python3', ['scripts/probe_video.py', tempFilePath], { encoding: 'utf-8' });
+      probedData = JSON.parse(probeOutput);
+    } catch (err) {
+      console.error('Python video probe execution error:', err);
+    }
+  }
 
   const record: VideoRecord = {
     video_id: videoId,
     file_name: fileName,
-    sha256: file ? 'mock_sha256_' + uuidv4().slice(0, 8) : 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    sha256: probedData.sha256 || (file ? 'mock_sha256_' + uuidv4().slice(0, 8) : 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'),
     status: 'validated',
-    mime_type: file ? file.mimetype : 'video/mp4',
-    file_size_bytes: file ? file.size : 15420000,
-    duration_us: 10000000,
-    width: 1920,
-    height: 1080,
-    fps_avg: 30.0,
+    mime_type: probedData.mime_type || (file ? file.mimetype : 'video/mp4'),
+    file_size_bytes: probedData.file_size_bytes || (file ? file.size : 15420000),
+    duration_us: probedData.duration_us || 10000000,
+    width: probedData.width || 1920,
+    height: probedData.height || 1080,
+    fps_avg: probedData.fps_avg || 30.0,
     created_at: new Date().toISOString(),
     authorization_attested: true,
     adult_subject_attested: true,
+    file_path: tempFilePath,
   };
 
   videosStore.set(videoId, record);
@@ -257,6 +304,12 @@ app.get('/api/v1/analyses/:analysis_id/blueprint', (req, res) => {
 // GET /api/v1/analyses/:analysis_id/bundle
 app.get('/api/v1/analyses/:analysis_id/bundle', async (req, res) => {
   const jobId = req.params.analysis_id;
+
+  const bundlePath = bundlePathsStore.get(jobId);
+  if (bundlePath && fs.existsSync(bundlePath)) {
+    return res.download(bundlePath, `bundle_${jobId.slice(0, 8)}.zip`);
+  }
+
   let bp = blueprintsStore.get(jobId);
 
   if (!bp) {
@@ -336,6 +389,12 @@ app.patch('/api/v1/analyses/:analysis_id/annotations', (req, res) => {
 // POST /api/v1/analyses/:analysis_id/validate
 app.post('/api/v1/analyses/:analysis_id/validate', (req, res) => {
   const jobId = req.params.analysis_id;
+
+  const existingReport = validationReportsStore.get(jobId);
+  if (existingReport) {
+    return res.json(existingReport);
+  }
+
   let bp = blueprintsStore.get(jobId);
 
   if (!bp) {

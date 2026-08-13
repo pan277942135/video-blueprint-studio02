@@ -175,8 +175,20 @@ export default function App() {
   };
 
   // Handler: Download Bundle ZIP
-  const handleDownloadBundle = (jobId: string) => {
-    window.open(`/api/v1/analyses/${jobId}/bundle`, '_blank');
+  const handleDownloadBundle = async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/v1/analyses/${jobId}/bundle`);
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bundle_${jobId.slice(0, 8)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download bundle:', err);
+    }
   };
 
   // Handler: Download Raw Blueprint JSON

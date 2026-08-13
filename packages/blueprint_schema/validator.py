@@ -58,4 +58,32 @@ class BlueprintValidator:
             if fps_den is not None and fps_den <= 0:
                 errors.append("Invariant Violation: timebase.fps_den must be a positive integer.")
 
+        # 5. Cross-Reference Validation: Character IDs
+        declared_char_ids = {
+            c.get("character_id") for c in blueprint_data.get("characters", []) if isinstance(c, dict) and "character_id" in c
+        }
+        shots = blueprint_data.get("shots", [])
+        if isinstance(shots, list):
+            for i, shot in enumerate(shots):
+                if isinstance(shot, dict):
+                    dom_ids = shot.get("dominant_character_ids", [])
+                    if isinstance(dom_ids, list):
+                        for char_id in dom_ids:
+                            if char_id not in declared_char_ids:
+                                errors.append(f"Cross-Reference Violation: shot[{i}] references dominant_character_id '{char_id}' which is not defined in characters[].")
+
+        # 6. Timeline Bounds Validation
+        if isinstance(timebase, dict):
+            frame_count = timebase.get("frame_count")
+            if isinstance(frame_count, int) and frame_count > 0 and isinstance(shots, list):
+                for i, shot in enumerate(shots):
+                        if isinstance(shot, dict):
+                            keyframes = shot.get("keyframes", [])
+                            if isinstance(keyframes, list):
+                                for k_idx, kf in enumerate(keyframes):
+                                    if isinstance(kf, dict):
+                                        f_idx = kf.get("frame_idx")
+                                        if isinstance(f_idx, int) and f_idx >= frame_count:
+                                            errors.append(f"Timeline Bounds Violation: shot[{i}] keyframe[{k_idx}] frame_idx ({f_idx}) >= total frame_count ({frame_count}).")
+
         return (len(errors) == 0, errors)

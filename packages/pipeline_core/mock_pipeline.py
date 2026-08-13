@@ -87,7 +87,7 @@ def run_deterministic_mock_pipeline(
         
     blueprint_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"blueprint:{valid_job_id}"))
     
-    source_video = probe_source_video or {
+    source_video: dict[str, Any] = probe_source_video or {
         "file_name": video_file_name,
         "mime_type": "video/mp4",
         "container": "mov,mp4,m4a,3gp,3g2,mj2",
@@ -116,7 +116,7 @@ def run_deterministic_mock_pipeline(
         "metadata_stripped": True
     }
 
-    timebase = probe_timebase or {
+    timebase: dict[str, Any] = probe_timebase or {
         "normalized_to_cfr": True,
         "fps_num": 30,
         "fps_den": 1,
@@ -126,6 +126,10 @@ def run_deterministic_mock_pipeline(
         "end_pts_us": 5966667,
         "source_pts_map_ref": None
     }
+
+    frame_count = int(timebase["frame_count"])
+    last_frame = frame_count - 1
+    end_pts_us = int(timebase["end_pts_us"])
 
     # 1. Blueprint Manifest matching canonical schema
     blueprint: dict[str, Any] = {
@@ -157,9 +161,9 @@ def run_deterministic_mock_pipeline(
                 "shot_id": "shot_000",
                 "index": 0,
                 "frame_start": 0,
-                "frame_end": 179,
+                "frame_end": last_frame,
                 "time_start_us": 0,
-                "time_end_us": 5966667,
+                "time_end_us": end_pts_us,
                 "cut_in_type": "start",
                 "cut_out_type": "end",
                 "transition_score": 1.0,
@@ -172,7 +176,7 @@ def run_deterministic_mock_pipeline(
                         "image_uri": "artifacts/keyframes/shot_000_000000.png"
                     }
                 ],
-                "dominant_character_ids": ["char_000"],
+                "dominant_character_ids": [],
                 "camera_motion_id": "cam_000",
                 "quality": {
                     "score": 0.95,
@@ -253,23 +257,7 @@ def run_deterministic_mock_pipeline(
     }
 
     # 2. Sidecars
-    sidecars = {
-        "sidecars/pts_map.json": {
-            "frame_count": 180,
-            "pts_timestamps": [i * (1.0 / 30.0) for i in range(180)]
-        },
-        "sidecars/camera_motion_affine.json": {
-            "motion_type": "2d_affine",
-            "transforms": [
-                {"frame": i, "matrix": [[1.0, 0.0, 0.1 * i], [0.0, 1.0, 0.05 * i]]}
-                for i in range(0, 180, 10)
-            ]
-        },
-        "sidecars/environment_background_mask.json": {
-            "mask_type": "rle",
-            "data": "100x200:10000"
-        }
-    }
+    sidecars = {}
     sidecars.update(normalized_sidecars)
 
     return blueprint, sidecars

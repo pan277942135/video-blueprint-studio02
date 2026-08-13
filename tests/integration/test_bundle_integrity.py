@@ -130,3 +130,4 @@ def test_zip_bundle_integrity():
                     assert not content.startswith(b"/tmp/")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+

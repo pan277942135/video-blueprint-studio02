@@ -290,3 +290,4 @@ def test_validate_normalization_rational_fps_mismatch_rejected(cfr_30fps_video):
             target_fps_den=1001,
             pts_map_matrix=np.zeros((probe_res.source_frame_count or 60, 2), dtype=np.int64)
         )
+
