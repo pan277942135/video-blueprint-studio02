@@ -161,6 +161,7 @@ def main() -> int:
     os.environ["VBS_RTMPOSE_CONFIG"] = str(rtmpose_config)
     os.environ["VBS_RTMPOSE_CHECKPOINT"] = str(rtmpose_checkpoint)
     os.environ["VBS_RTMPOSE_WEIGHTS_LICENSE"] = "OpenMMLab MMPose Apache-2.0; project-approved official checkpoint"
+    os.environ["VBS_RTMPOSE_EXPECTED_SHA256"] = expected_rtmpose_sha256
     os.environ["VBS_RTMPOSE_WEIGHTS_APPROVED"] = "true"
     os.environ["VBS_RTMPOSE_DEVICE"] = "cpu"
 
