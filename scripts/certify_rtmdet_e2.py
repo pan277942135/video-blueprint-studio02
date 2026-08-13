@@ -8,6 +8,13 @@ import pathlib
 import sys
 import uuid
 
+# `python scripts/certify_rtmdet_e2.py` places only the scripts directory at
+# the front of sys.path. Add the repository root explicitly so the in-repo
+# `packages.*` namespace is available both in CI and for local certification.
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from jsonschema import Draft202012Validator, FormatChecker
 
 from packages.pipeline_core.media_probe import compute_sha256
