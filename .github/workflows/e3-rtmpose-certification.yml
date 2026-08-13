@@ -103,18 +103,14 @@ jobs:
           sha256sum .cert/rtmdet_tiny.pth | tee .cert/rtmdet_weights.sha256
           test "$(cut -d' ' -f1 .cert/rtmdet_weights.sha256)" = "$EXPECTED_SHA256"
 
-      - name: Download approved RTMPose Tiny checkpoint and establish full SHA256
+      - name: Download and verify approved RTMPose Tiny checkpoint
         run: |
-          PUBLISHER_SHA_PREFIX="e613ba3f"
+          EXPECTED_SHA256="77ffc7e802acf10951c353e8bc68b4f05218121177ceaea163aa124436ba6fb7"
           curl --fail --location --retry 3 --output .cert/rtmpose_tiny.pth \
             https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmpose-tiny_simcc-coco_pt-aic-coco_420e-256x192-e613ba3f_20230127.pth
           sha256sum .cert/rtmpose_tiny.pth | tee .cert/rtmpose_weights.sha256
-          FULL_SHA256="$(cut -d' ' -f1 .cert/rtmpose_weights.sha256)"
-          case "$FULL_SHA256" in
-            "$PUBLISHER_SHA_PREFIX"*) ;;
-            *) echo "RTMPose SHA256 does not match publisher filename prefix"; exit 1 ;;
-          esac
-          echo "RTMPOSE_FULL_SHA256=$FULL_SHA256" | tee .cert/rtmpose_full_sha256.env
+          test "$(cut -d' ' -f1 .cert/rtmpose_weights.sha256)" = "$EXPECTED_SHA256"
+          echo "RTMPOSE_FULL_SHA256=$EXPECTED_SHA256" | tee .cert/rtmpose_full_sha256.env
 
       - name: Download official OpenMMLab human sample
         run: |
@@ -170,7 +166,7 @@ jobs:
             --rtmdet-checkpoint .cert/rtmdet_tiny.pth \
             --rtmpose-config "$RTMPOSE_CONFIG" \
             --rtmpose-checkpoint .cert/rtmpose_tiny.pth \
-            --rtmpose-sha-prefix e613ba3f \
+            --expected-rtmpose-sha256 77ffc7e802acf10951c353e8bc68b4f05218121177ceaea163aa124436ba6fb7 \
             --output .cert/e3_rtmpose_certification.json
 
       - name: Show certification result
