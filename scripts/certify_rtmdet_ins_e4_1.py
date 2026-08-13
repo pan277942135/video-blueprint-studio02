@@ -12,7 +12,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from packages.blueprint_schema.validator import BlueprintValidator
+from jsonschema import Draft202012Validator, FormatChecker
+
 from packages.pipeline_core.binary_rle import decode_rle
 from packages.pipeline_core.e4_media_pipeline import run_e4_media_pipeline
 from packages.pipeline_core.media_probe import compute_sha256
@@ -38,6 +39,32 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--mask-checkpoint", required=True)
     parser.add_argument("--output", default=".cert/e4_1_rtmdet_ins_certification.json")
     return parser.parse_args()
+
+
+def _validate_mask_ref(ref: dict, frame_count: int, height: int, width: int) -> None:
+    expected = {
+        "format": "rle_json",
+        "dtype": "bool",
+        "shape": [frame_count, height, width],
+        "axes": ["frame", "y", "x"],
+        "unit": "binary",
+        "coordinate_space": "pixel_xy",
+        "sampling": "per_frame",
+        "frame_start": 0,
+        "frame_end": frame_count - 1,
+        "nan_policy": "preserve",
+        "interpolation_policy": "none",
+    }
+    for key, value in expected.items():
+        if ref.get(key) != value:
+            raise SystemExit(f"mask ref semantic mismatch for {key}: {ref.get(key)!r} != {value!r}")
+    metadata = ref.get("metadata", {})
+    if metadata.get("encoding") != "row_major_binary_rle_v1":
+        raise SystemExit("mask ref encoding mismatch")
+    if metadata.get("foreground_value") != 1 or metadata.get("background_value") != 0:
+        raise SystemExit("mask ref binary-value metadata mismatch")
+    if "missing_frame_value" not in metadata or metadata.get("missing_frame_value") is not None:
+        raise SystemExit("mask ref missing-frame policy must be null")
 
 
 def main() -> int:
@@ -84,9 +111,10 @@ def main() -> int:
         video_sha256=compute_sha256(str(video)),
         video_path=str(video),
     )
-    valid, errors = BlueprintValidator().validate(blueprint)
-    if not valid:
-        raise SystemExit(f"Blueprint validation failed: {errors}")
+
+    schema_path = REPO_ROOT / "contracts" / "video_blueprint.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    Draft202012Validator(schema, format_checker=FormatChecker()).validate(blueprint)
     if blueprint["processing"]["pipeline_version"] != "0.4.0-e4.1":
         raise SystemExit("E4.1 pipeline version was not emitted")
 
@@ -100,6 +128,9 @@ def main() -> int:
     if not stage or stage.get("status") != "succeeded":
         raise SystemExit("person_mask stage did not succeed")
 
+    frame_count = int(blueprint["timebase"]["frame_count"])
+    height = int(blueprint["source_video"]["height"])
+    width = int(blueprint["source_video"]["width"])
     characters = blueprint.get("characters", [])
     refs = [character.get("person_mask_ref") for character in characters]
     refs = [ref for ref in refs if isinstance(ref, dict)]
@@ -108,13 +139,14 @@ def main() -> int:
 
     observed_frames = 0
     for ref in refs:
+        _validate_mask_ref(ref, frame_count, height, width)
         path = sidecars.get(ref["uri"])
         if not isinstance(path, (str, os.PathLike)) or not pathlib.Path(path).is_file():
             raise SystemExit(f"mask sidecar missing: {ref['uri']}")
         if _sha256(pathlib.Path(path)) != ref["checksum_sha256"]:
             raise SystemExit(f"mask sidecar checksum mismatch: {ref['uri']}")
         payload = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-        if len(payload["frames"]) != blueprint["timebase"]["frame_count"]:
+        if len(payload["frames"]) != frame_count:
             raise SystemExit("mask sidecar frame count mismatch")
         for item in payload["frames"]:
             if item is None:
