@@ -6,7 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any
+from typing import Any, Literal
 
 import cv2
 import numpy as np
@@ -219,14 +219,19 @@ class MediaPipeFaceHandRefiner:
                 f"HandLandmarker task SHA256 mismatch: expected {APPROVED_HAND_TASK_SHA256}, got {hand_sha256}"
             )
 
+        runtime: Any
         if mediapipe_module is None:
             try:
-                import mediapipe as mediapipe_module
+                import mediapipe as mp_runtime
             except ImportError as exc:
                 raise MediaPipeFaceHandConfigurationError(
                     f"MediaPipe {APPROVED_MEDIAPIPE_VERSION} runtime is not installed; E3.2 fails closed"
                 ) from exc
-        runtime_version = str(getattr(mediapipe_module, "__version__", "unknown"))
+            runtime = mp_runtime
+        else:
+            runtime = mediapipe_module
+
+        runtime_version = str(getattr(runtime, "__version__", "unknown"))
         if runtime_version != APPROVED_MEDIAPIPE_VERSION:
             raise MediaPipeFaceHandConfigurationError(
                 f"MediaPipe runtime version must be {APPROVED_MEDIAPIPE_VERSION}, got {runtime_version}"
@@ -237,7 +242,7 @@ class MediaPipeFaceHandRefiner:
         self.hand_task_sha256 = hand_sha256
         self.config_sha256 = _config_hash(config, face_sha256, hand_sha256)
         self.weights_sha256 = hashlib.sha256(f"{face_sha256}:{hand_sha256}".encode()).hexdigest()
-        self._mp = mediapipe_module
+        self._mp: Any = runtime
         self._states: dict[str, _CharacterTasks] = {}
 
     @classmethod
@@ -360,7 +365,12 @@ class MediaPipeFaceHandRefiner:
                 raise MediaPipeFaceHandConfigurationError("MediaPipe hand result is missing handedness classification")
             category = max(categories, key=lambda item: float(getattr(item, "score", 0.0)))
             category_name = str(getattr(category, "category_name", "")).strip().lower()
-            if category_name not in {"left", "right"}:
+            side: Literal["left", "right"]
+            if category_name == "left":
+                side = "left"
+            elif category_name == "right":
+                side = "right"
+            else:
                 raise MediaPipeFaceHandConfigurationError(f"Unexpected MediaPipe handedness category: {category_name!r}")
             handedness_score = float(getattr(category, "score", np.nan))
             if not np.isfinite(handedness_score):
@@ -377,15 +387,15 @@ class MediaPipeFaceHandRefiner:
                 frame_height=frame_height,
             )
             observation = HandObservation(
-                side=category_name,
+                side=side,
                 landmarks_xy=points,
                 bbox_xyxy=_bbox_from_points(points),
                 confidence=_conservative_presence_score(landmarks, self.config.min_hand_presence_confidence),
                 handedness_confidence=handedness_score,
             )
-            previous = best_by_side.get(category_name)
+            previous = best_by_side.get(side)
             if previous is None or observation.handedness_confidence > previous.handedness_confidence:
-                best_by_side[category_name] = observation
+                best_by_side[side] = observation
 
         if face is None and not best_by_side:
             return None
