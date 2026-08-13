@@ -193,7 +193,9 @@ def _atomic_write_npz(path: str, arrays: dict[str, np.ndarray]) -> None:
     temporary = f"{path}.tmp"
     try:
         with open(temporary, "wb") as handle:
-            np.savez_compressed(handle, **arrays)
+            # NumPy's runtime API accepts a binary file handle plus named arrays;
+            # the current numpy typing stub misclassifies **arrays as keyword options.
+            np.savez_compressed(handle, **arrays)  # type: ignore[arg-type]
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
