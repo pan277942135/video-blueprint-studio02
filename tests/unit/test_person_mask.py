@@ -51,7 +51,7 @@ class _Segmenter:
             return None
         height, width = frame.shape[:2]
         mask = np.zeros((height, width), dtype=np.bool_)
-        x1, y1, x2, y2 = (int(round(value)) for value in bbox_xyxy)
+        x1, y1, x2, y2 = (round(value) for value in bbox_xyxy)
         mask[y1:y2, x1:x2] = True
         return PersonMaskObservation(frame_idx, character_id, mask, 0.8)
 
