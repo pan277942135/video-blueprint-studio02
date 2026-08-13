@@ -43,10 +43,19 @@ jobs:
           pip install "mmengine>=0.7.1,<1.0.0"
           pip install "mmcv==2.1.0" -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html
           pip install "mmdet==3.3.0"
-          pip install -e .[dev] --no-deps
+          # Install only the project dependencies exercised by the real-media
+          # certification path. The editable package itself stays --no-deps so
+          # its broad OpenCV requirement cannot perturb the certified ABI stack.
+          pip install "jsonschema>=4.18.0" "scenedetect>=0.6.7,<0.7"
+          pip install -e . --no-deps
           python - <<'PY'
+          import jsonschema
           import numpy
+          import scenedetect
           assert numpy.__version__ == "1.26.4", numpy.__version__
+          print("numpy", numpy.__version__)
+          print("jsonschema", jsonschema.__version__)
+          print("scenedetect", scenedetect.__version__)
           PY
 
       - name: Resolve installed RTMDet Tiny config
