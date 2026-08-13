@@ -1,0 +1,77 @@
+name: E4.1 RTMDet-Ins Artifact Bootstrap
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - ".github/workflows/e4-1-rtmdet-ins-artifact-bootstrap.yml"
+      - "docs/epics/E4.1-person-mask-plan.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  artifact-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download official OpenMMLab checkpoint without inference
+        run: |
+          set -euo pipefail
+          mkdir -p .cert
+          URL="https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth"
+          printf '%s\n' "$URL" > .cert/checkpoint_url.txt
+          curl --fail --location --retry 3 --dump-header .cert/headers.txt \
+            --output .cert/rtmdet-ins-tiny.pth "$URL"
+          test -s .cert/rtmdet-ins-tiny.pth
+
+      - name: Compute byte-exact evidence
+        run: |
+          set -euo pipefail
+          sha256sum .cert/rtmdet-ins-tiny.pth | tee .cert/checkpoint.sha256
+          stat --printf='%s\n' .cert/rtmdet-ins-tiny.pth | tee .cert/checkpoint.size
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path('.cert')
+          path = root / 'rtmdet-ins-tiny.pth'
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          headers = {}
+          keep = {'etag', 'last-modified', 'content-length'}
+          for line in (root / 'headers.txt').read_text(errors='replace').splitlines():
+              if ':' not in line:
+                  continue
+              key, value = line.split(':', 1)
+              key = key.strip().lower()
+              if key in keep:
+                  headers[key] = value.strip()
+          evidence = {
+              'status': 'hash_only_no_inference',
+              'model': 'rtmdet-ins_tiny_8xb32-300e_coco',
+              'config': 'configs/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco.py',
+              'url': (root / 'checkpoint_url.txt').read_text().strip(),
+              'size_bytes': path.stat().st_size,
+              'sha256': digest,
+              'response_headers': headers,
+              'inference_executed': False,
+          }
+          (root / 'evidence.json').write_text(json.dumps(evidence, indent=2, sort_keys=True) + '\n')
+          print(json.dumps(evidence, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload hash-only evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: e4-1-rtmdet-ins-artifact-bootstrap
+          path: |
+            .cert/checkpoint_url.txt
+            .cert/headers.txt
+            .cert/checkpoint.sha256
+            .cert/checkpoint.size
+            .cert/evidence.json
+          if-no-files-found: error
