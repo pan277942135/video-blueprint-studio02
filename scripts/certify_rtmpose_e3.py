@@ -16,9 +16,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from jsonschema import Draft202012Validator, FormatChecker
+
 from packages.pipeline_core.media_probe import compute_sha256
 from packages.pipeline_core.real_media_pipeline import run_real_media_pipeline
-
 
 VERIFIED_RTMPOSE_SHA256 = "77ffc7e802acf10951c353e8bc68b4f05218121177ceaea163aa124436ba6fb7"
 
