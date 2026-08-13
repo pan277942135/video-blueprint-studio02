@@ -195,3 +195,15 @@ jobs:
           cat .cert/rtmpose_weights.sha256 || true
           cat .cert/rtmpose_full_sha256.env || true
           cat .cert/e3_rtmpose_certification.json || true
+
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e3-rtmpose-certification
+          path: |
+            .cert/rtmdet_weights.sha256
+            .cert/rtmpose_weights.sha256
+            .cert/rtmpose_full_sha256.env
+            .cert/e3_rtmpose_certification.json
+          if-no-files-found: warn
