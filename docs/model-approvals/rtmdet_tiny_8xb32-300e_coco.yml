@@ -11,8 +11,8 @@ upstream:
   weights_url: "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_tiny_8xb32-300e_coco/rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth"
 integrity:
   publisher_filename_sha256_prefix: "78e30dcc"
-  verified_sha256: null
-  verification_status: "pending_certification_download"
+  verified_sha256: "78e30dcce0c6f594eaff0d6977b84b4103688b4aff0ad1aa16008a8cc854a7fb"
+  verification_status: "official_download_verified"
 license_record:
   runtime_code: "MMDetection Apache-2.0"
   rtmdet_deployment_basis: "OpenMMLab maintainer guidance: RTMDet deployment is Apache-2.0"
