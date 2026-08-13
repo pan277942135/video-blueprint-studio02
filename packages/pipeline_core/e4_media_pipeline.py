@@ -11,6 +11,7 @@ from packages.pipeline_core.person_mask import (
     run_person_mask_refinement,
 )
 from packages.pipeline_core.real_media_pipeline import run_real_media_pipeline
+from packages.pipeline_core.rtmdet_ins_mask_backend import RTMDetInsPersonMaskSegmenter
 
 
 def _extended_hash(current: str, segmenter: PersonMaskSegmenter) -> str:
@@ -26,13 +27,21 @@ def run_e4_media_pipeline(
     *,
     person_mask_segmenter: PersonMaskSegmenter | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run the certified base pipeline and optionally append E4.1 person masks."""
+    """Run the certified base pipeline and optionally append E4.1 person masks.
+
+    An explicitly injected segmenter is used by deterministic tests/certification.
+    Otherwise the approved RTMDet-Ins adapter is resolved from the environment.
+    A completely absent E4.1 configuration leaves the certified E3 pipeline
+    unchanged; a partial/unapproved/mismatched configuration fails closed.
+    """
     blueprint, sidecars = run_real_media_pipeline(
         job_id=job_id,
         video_file_name=video_file_name,
         video_sha256=video_sha256,
         video_path=video_path,
     )
+    if person_mask_segmenter is None:
+        person_mask_segmenter = RTMDetInsPersonMaskSegmenter.from_environment()
     if person_mask_segmenter is None:
         return blueprint, sidecars
 
