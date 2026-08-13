@@ -1,5 +1,7 @@
 import hashlib
+import json
 import os
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from packages.pipeline_core.media_probe import InvalidMediaError
@@ -10,6 +12,18 @@ from packages.pipeline_core.shot_detection import ShotDetectionConfig, ShotDetec
 def _config_hash(config: ShotDetectionConfig) -> str:
     payload = f"shots:content-detector:{config.threshold}:{config.min_scene_len_frames}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _package_version(package_name: str) -> str:
+    try:
+        return version(package_name)
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _json_sha256(value: Any) -> str:
+    payload = json.dumps(value, indent=2).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def run_real_media_pipeline(
@@ -44,6 +58,7 @@ def run_real_media_pipeline(
 
     timebase = blueprint["timebase"]
     config = ShotDetectionConfig()
+    config_hash = _config_hash(config)
     artifact_root = os.path.join(os.path.dirname(video_path), f"vbs_artifacts_{job_id}")
     shots, shot_sidecars = detect_shots(
         str(normalized_path),
@@ -55,6 +70,19 @@ def run_real_media_pipeline(
     )
     sidecars.update(shot_sidecars)
     blueprint["shots"] = shots
+
+    report_uri = "artifacts/reports/shot_detection.json"
+    shot_report = shot_sidecars.get(report_uri)
+    if not isinstance(shot_report, dict):
+        raise ShotDetectionError("Shot detector did not emit its required provenance report")
+    blueprint["artifacts"]["reports"] = [
+        {
+            "kind": "shot_detection",
+            "uri": report_uri,
+            "sha256": _json_sha256(shot_report),
+            "mime_type": "application/json",
+        }
+    ]
 
     # Camera/environment analysis belongs to later Epics. Remove E0 placeholder
     # confidence claims from the real-media path rather than presenting mock
@@ -98,7 +126,7 @@ def run_real_media_pipeline(
     ]
 
     blueprint["processing"]["pipeline_version"] = "0.2.0-e2.1"
-    blueprint["processing"]["config_hash"] = _config_hash(config)
+    blueprint["processing"]["config_hash"] = config_hash
     blueprint["processing"]["stages"] = [
         {
             "name": "media_probe_normalize",
@@ -124,7 +152,27 @@ def run_real_media_pipeline(
         "threshold": config.threshold,
         "min_scene_len_frames": config.min_scene_len_frames,
         "shot_count": len(shots),
-        "report_uri": "artifacts/reports/shot_detection.json",
+        "report_uri": report_uri,
     }
+    blueprint["provenance"]["tools"] = [
+        {
+            "module": "shot_detection",
+            "tool": "PySceneDetect ContentDetector",
+            "version": _package_version("scenedetect"),
+            "code_commit": os.environ.get("GITHUB_SHA"),
+            "weights_sha256": None,
+            "config_hash": config_hash,
+            "license": "BSD-3-Clause",
+        },
+        {
+            "module": "shot_keyframes",
+            "tool": "OpenCV",
+            "version": _package_version("opencv-python-headless"),
+            "code_commit": os.environ.get("GITHUB_SHA"),
+            "weights_sha256": None,
+            "config_hash": config_hash,
+            "license": "Apache-2.0",
+        },
+    ]
 
     return blueprint, sidecars
