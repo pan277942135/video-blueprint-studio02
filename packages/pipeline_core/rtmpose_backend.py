@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
@@ -21,6 +22,7 @@ class RTMPoseBackendConfig:
     config_path: str
     checkpoint_path: str
     weights_license: str
+    expected_weights_sha256: str
     device: str = "cpu"
 
 
@@ -30,6 +32,15 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _normalize_sha256(value: str) -> str:
+    normalized = value.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", normalized) is None:
+        raise RTMPoseConfigurationError(
+            "RTMPose expected checkpoint SHA256 must be exactly 64 hexadecimal characters"
+        )
+    return normalized
 
 
 def _package_version(package_name: str) -> str:
@@ -78,8 +89,16 @@ class RTMPosePoseEstimator:
         if not config.weights_license.strip():
             raise RTMPoseConfigurationError("RTMPose checkpoint license must be recorded explicitly")
 
+        expected_weights_sha256 = _normalize_sha256(config.expected_weights_sha256)
+        actual_weights_sha256 = _sha256_file(config.checkpoint_path)
+        if actual_weights_sha256 != expected_weights_sha256:
+            raise RTMPoseConfigurationError(
+                "RTMPose checkpoint SHA256 mismatch: "
+                f"expected {expected_weights_sha256}, got {actual_weights_sha256}"
+            )
+
         self.config = config
-        self.weights_sha256 = _sha256_file(config.checkpoint_path)
+        self.weights_sha256 = actual_weights_sha256
         self.config_sha256 = _sha256_file(config.config_path)
 
         if init_model_fn is None or inference_topdown_fn is None:
@@ -105,15 +124,23 @@ class RTMPosePoseEstimator:
         config_path = os.environ.get("VBS_RTMPOSE_CONFIG")
         checkpoint_path = os.environ.get("VBS_RTMPOSE_CHECKPOINT")
         weights_license = os.environ.get("VBS_RTMPOSE_WEIGHTS_LICENSE")
+        expected_weights_sha256 = os.environ.get("VBS_RTMPOSE_EXPECTED_SHA256")
         approval_raw = os.environ.get("VBS_RTMPOSE_WEIGHTS_APPROVED")
 
-        configured_values = [config_path, checkpoint_path, weights_license, approval_raw]
+        configured_values = [
+            config_path,
+            checkpoint_path,
+            weights_license,
+            expected_weights_sha256,
+            approval_raw,
+        ]
         if all(value is None for value in configured_values):
             return None
         if any(value is None for value in configured_values):
             raise RTMPoseConfigurationError(
                 "Incomplete RTMPose configuration: VBS_RTMPOSE_CONFIG, VBS_RTMPOSE_CHECKPOINT, "
-                "VBS_RTMPOSE_WEIGHTS_LICENSE, and VBS_RTMPOSE_WEIGHTS_APPROVED are all required"
+                "VBS_RTMPOSE_WEIGHTS_LICENSE, VBS_RTMPOSE_EXPECTED_SHA256, and "
+                "VBS_RTMPOSE_WEIGHTS_APPROVED are all required"
             )
 
         approved = str(approval_raw).strip().lower() in {"1", "true", "yes"}
@@ -122,6 +149,7 @@ class RTMPosePoseEstimator:
                 config_path=str(config_path),
                 checkpoint_path=str(checkpoint_path),
                 weights_license=str(weights_license),
+                expected_weights_sha256=str(expected_weights_sha256),
                 device=os.environ.get("VBS_RTMPOSE_DEVICE", "cpu"),
             ),
             weights_approved=approved,
