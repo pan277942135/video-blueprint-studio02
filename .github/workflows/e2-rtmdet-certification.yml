@@ -35,11 +35,19 @@ jobs:
       - name: Install project and OpenMMLab runtime
         run: |
           python -m pip install --upgrade pip
+          # Torch 2.1/MMCV 2.1 wheels were built against the NumPy 1.x ABI.
+          # Keep NumPy below 2 and avoid the OpenCV 5 dependency path that can
+          # otherwise pull NumPy 2 back into the certification environment.
+          pip install "numpy==1.26.4" "opencv-python==4.10.0.84"
           pip install --index-url https://download.pytorch.org/whl/cpu torch==2.1.0 torchvision==0.16.0
           pip install "mmengine>=0.7.1,<1.0.0"
           pip install "mmcv==2.1.0" -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html
           pip install "mmdet==3.3.0"
           pip install -e .[dev] --no-deps
+          python - <<'PY'
+          import numpy
+          assert numpy.__version__ == "1.26.4", numpy.__version__
+          PY
 
       - name: Resolve installed RTMDet Tiny config
         run: |
@@ -54,18 +62,22 @@ jobs:
           PY
           cat .cert/config_path.txt
 
-      - name: Download approved OpenMMLab checkpoint
+      - name: Download and verify approved OpenMMLab checkpoint
         run: |
+          EXPECTED_SHA256="78e30dcce0c6f594eaff0d6977b84b4103688b4aff0ad1aa16008a8cc854a7fb"
           curl --fail --location --retry 3 --output .cert/rtmdet_tiny.pth \
             https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_tiny_8xb32-300e_coco/rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth
           sha256sum .cert/rtmdet_tiny.pth | tee .cert/weights.sha256
-          test "$(cut -c1-8 .cert/weights.sha256)" = "78e30dcc"
+          test "$(cut -d' ' -f1 .cert/weights.sha256)" = "$EXPECTED_SHA256"
 
       - name: Download official MMDetection demo image and build a short real-media video
         run: |
           curl --fail --location --retry 3 --output .cert/demo.jpg \
             https://raw.githubusercontent.com/open-mmlab/mmdetection/v3.3.0/demo/demo.jpg
+          # yuv420p/H.264 requires even dimensions; the upstream demo image is
+          # 640x427, so pad only the bottom edge by one pixel without resizing.
           ffmpeg -hide_banner -loglevel error -loop 1 -i .cert/demo.jpg -t 1.5 -r 4 \
+            -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" \
             -c:v libx264 -pix_fmt yuv420p -movflags +faststart .cert/person_smoke.mp4
           ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate \
             -of default=noprint_wrappers=1 .cert/person_smoke.mp4
@@ -78,6 +90,7 @@ jobs:
             --config "$CONFIG_PATH" \
             --checkpoint .cert/rtmdet_tiny.pth \
             --sha-prefix 78e30dcc \
+            --expected-sha256 78e30dcce0c6f594eaff0d6977b84b4103688b4aff0ad1aa16008a8cc854a7fb \
             --output .cert/e2_rtmdet_certification.json
 
       - name: Show certification result
