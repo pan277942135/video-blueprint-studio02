@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
