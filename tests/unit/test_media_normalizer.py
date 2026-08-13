@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from fractions import Fraction
 
 import numpy as np
 import pytest
@@ -123,6 +124,9 @@ def test_cfr_2997fps_preserves_accurate_rational(cfr_2997fps_video):
         norm_res = normalize_media_to_cfr(cfr_2997fps_video, probe_res, temp_out)
         assert norm_res.fps_num == 30000
         assert norm_res.fps_den == 1001
+        norm_p = probe_media(norm_res.normalized_video_path)
+        n_s, d_s = norm_p.r_frame_rate.split("/")
+        assert Fraction(int(n_s), int(d_s)) == Fraction(30000, 1001)
 
 
 def test_cfr_60fps_max_30fps_capped(cfr_60fps_video):
@@ -274,3 +278,15 @@ def test_av_drift_measurement_and_validation_failure():
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+
+def test_validate_normalization_rational_fps_mismatch_rejected(cfr_30fps_video):
+    probe_res = probe_media(cfr_30fps_video)
+    # Source/normalized video is 30/1, target is 30000/1001 -> must be rejected
+    with pytest.raises(NormalizationValidationError, match="rational FPS"):
+        validate_normalization(
+            normalized_video_path=cfr_30fps_video,
+            probe_result=probe_res,
+            target_fps_num=30000,
+            target_fps_den=1001,
+            pts_map_matrix=np.zeros((probe_res.source_frame_count or 60, 2), dtype=np.int64)
+        )
