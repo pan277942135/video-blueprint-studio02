@@ -4,12 +4,11 @@ import os
 import sys
 import tempfile
 
-# Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from packages.blueprint_schema import BlueprintValidator
 from packages.pipeline_core.bundle_exporter import create_bundle_zip
-from packages.pipeline_core.e8_media_pipeline import run_e8_media_pipeline
+from packages.pipeline_core.production_media_pipeline import run_production_media_pipeline
 
 
 def main():
@@ -32,7 +31,7 @@ def main():
     report_out_path = os.path.join(temp_dir, f"validation_{job_id}.json")
 
     try:
-        blueprint, sidecars = run_e8_media_pipeline(
+        blueprint, sidecars = run_production_media_pipeline(
             job_id=job_id,
             video_file_name=file_name,
             video_sha256=sha256,
@@ -57,25 +56,33 @@ def main():
             json.dump(val_report, f, indent=2)
 
         if not is_valid:
-            print(json.dumps({
-                "status": "failed",
-                "blueprint_path": blueprint_out_path,
-                "validation_report_path": report_out_path,
-                "valid": False,
-                "errors": errors,
-            }))
+            print(
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "blueprint_path": blueprint_out_path,
+                        "validation_report_path": report_out_path,
+                        "valid": False,
+                        "errors": errors,
+                    }
+                )
+            )
             sys.exit(1)
 
         create_bundle_zip(blueprint, sidecars, val_report, bundle_out_path)
 
-        print(json.dumps({
-            "status": "succeeded",
-            "blueprint_path": blueprint_out_path,
-            "bundle_path": bundle_out_path,
-            "validation_report_path": report_out_path,
-            "valid": True,
-            "errors": [],
-        }))
+        print(
+            json.dumps(
+                {
+                    "status": "succeeded",
+                    "blueprint_path": blueprint_out_path,
+                    "bundle_path": bundle_out_path,
+                    "validation_report_path": report_out_path,
+                    "valid": True,
+                    "errors": [],
+                }
+            )
+        )
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"status": "failed", "error": str(e)}))
         sys.exit(1)
