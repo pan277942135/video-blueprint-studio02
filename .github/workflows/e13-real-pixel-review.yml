@@ -85,7 +85,7 @@ jobs:
             --confidence-threshold 0.30 \
             | tee .cert/e13/e13_review_builder.log
 
-      - name: Assert E13-E16 evidence contract
+      - name: Assert E13-E17 evidence contract
         if: success()
         run: |
           set -euo pipefail
@@ -124,15 +124,17 @@ jobs:
               if not item['confirmed']
           ), tracking
 
-          # E15: retain the real face-coverage improvement with approved 0.5 gates.
+          # E15/E17: retain face recovery and require a meaningful hand-coverage
+          # improvement without lowering any approved MediaPipe 0.5 confidence gate.
           assert len(face_hands['characters']) == 1, face_hands
           face_row = face_hands['characters'][0]
           assert face_row['present_frames'] == 100, face_row
-          assert face_row['face_frames'] >= 20, face_row
+          assert face_row['face_frames'] >= 36, face_row
+          assert face_row['left_hand_frames'] >= 25, face_row
+          assert face_row['right_hand_frames'] >= 45, face_row
 
-          # E16: preserve shot keyframes but expand manual evidence across the full
-          # normalized timeline. Detail overlays must expose measured face/hand
-          # geometry directly in the review pack rather than via an ad-hoc script.
+          # E16: preserve shot keyframes while exposing fine-detail geometry in the
+          # permanent normalized-timeline review artifact.
           review_frames = review['review_frames']
           assert len(review_frames) == 12, review_frames
           review_indices = [row['frame_idx'] for row in review_frames]
@@ -143,6 +145,8 @@ jobs:
           detail_counts = review['review_frame_detail_counts']
           assert set(detail_counts) == {'face', 'left_hand', 'right_hand'}, detail_counts
           assert detail_counts['face'] >= 1, (detail_counts, review_frames)
+          assert detail_counts['left_hand'] >= 1, (detail_counts, review_frames)
+          assert detail_counts['right_hand'] >= 1, (detail_counts, review_frames)
           assert detail_counts['face'] <= face_row['face_frames'], (detail_counts, face_row)
           assert detail_counts['left_hand'] <= face_row['left_hand_frames'], (detail_counts, face_row)
           assert detail_counts['right_hand'] <= face_row['right_hand_frames'], (detail_counts, face_row)
