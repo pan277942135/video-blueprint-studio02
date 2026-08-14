@@ -44,6 +44,9 @@ target-version = "py311"
 [tool.ruff.lint]
 ignore = ["B008"]
 
+[tool.ruff.lint.per-file-ignores]
+"packages/pipeline_core/body_local_frame.py" = ["I001"]
+
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
