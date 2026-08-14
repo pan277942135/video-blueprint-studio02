@@ -114,8 +114,16 @@ def validate_camera_contract(blueprint: dict[str, Any]) -> list[str]:
             if row.get(key) is not None:
                 errors.append(f"E5 Camera Contract Violation: {row_path}.{key} must remain null in E5.1.")
 
-        frame_start = int(shot.get("frame_start"))
-        frame_end = int(shot.get("frame_end"))
+        frame_start_value = shot.get("frame_start")
+        frame_end_value = shot.get("frame_end")
+        if not isinstance(frame_start_value, int) or isinstance(frame_start_value, bool):
+            errors.append(f"E5 Camera Contract Violation: shot {shot_id!r}.frame_start must be an integer.")
+            continue
+        if not isinstance(frame_end_value, int) or isinstance(frame_end_value, bool):
+            errors.append(f"E5 Camera Contract Violation: shot {shot_id!r}.frame_end must be an integer.")
+            continue
+        frame_start = frame_start_value
+        frame_end = frame_end_value
         length = frame_end - frame_start + 1
         affine = row.get("affine_ref")
         if not isinstance(affine, dict):
