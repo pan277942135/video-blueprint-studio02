@@ -1,0 +1,150 @@
+name: E13 Real-Pixel Frame-to-Evidence Review
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - "packages/pipeline_core/e13_review_pack.py"
+      - "scripts/build_e13_review_pack.py"
+      - "scripts/run_real_video_e12.py"
+      - "scripts/install_e12_python_runtime.sh"
+      - ".github/workflows/e13-real-pixel-review.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-pixel-frame-to-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      E13_SAMPLE_URL: https://user-images.githubusercontent.com/87690686/164970135-b14e424c-765a-4180-9bc8-fa8d6abc5510.mp4
+      E13_SAMPLE_SHA256: TO_BE_PINNED_AFTER_FIRST_RUN
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download immutable real-human sample and verify identity
+        run: |
+          set -euo pipefail
+          mkdir -p .cert/e13
+          curl --fail --location --retry 3 --retry-delay 2 \
+            -o .cert/e13/real_sample.mp4 "$E13_SAMPLE_URL"
+          ACTUAL_SHA256="$(sha256sum .cert/e13/real_sample.mp4 | awk '{print $1}')"
+          SIZE_BYTES="$(stat -c '%s' .cert/e13/real_sample.mp4)"
+          python - <<PY
+          import json
+          from pathlib import Path
+          Path('.cert/e13/source_identity.json').write_text(json.dumps({
+              'url': '$E13_SAMPLE_URL',
+              'sha256': '$ACTUAL_SHA256',
+              'size_bytes': int('$SIZE_BYTES'),
+              'source': 'OpenMMLab MMPose official 3D human-pose demo input',
+              'upstream_doc': 'demo/docs/en/3d_human_pose_demo.md',
+          }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          PY
+          echo "E13 real sample SHA256: $ACTUAL_SHA256"
+          if [[ "$E13_SAMPLE_SHA256" == "TO_BE_PINNED_AFTER_FIRST_RUN" ]]; then
+            echo "E13 sample identity discovery complete; pin SHA256=$ACTUAL_SHA256 before certification can pass."
+            exit 12
+          fi
+          test "$ACTUAL_SHA256" = "$E13_SAMPLE_SHA256"
+
+      - uses: actions/setup-python@v5
+        if: success()
+        with:
+          python-version: "3.11"
+
+      - name: Install certified E2-E12 runtime dependencies
+        if: success()
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libegl1 libgles2 libgl1
+          bash scripts/install_e12_python_runtime.sh
+
+      - name: Run E12 on real pixels with verified bootstrap
+        if: success()
+        run: |
+          set -o pipefail
+          python scripts/run_real_video_e12.py \
+            --video .cert/e13/real_sample.mp4 \
+            --runtime-dir .cert/e13/runtime \
+            --output-dir .cert/e13/e12-output \
+            2>&1 | tee .cert/e13/e12_runner.log
+
+      - name: Build source-versus-evidence review pack
+        if: success()
+        run: |
+          set -euo pipefail
+          python scripts/build_e13_review_pack.py \
+            --video .cert/e13/real_sample.mp4 \
+            --bundle .cert/e13/e12-output/bundle.zip \
+            --output-dir .cert/e13/review \
+            --max-frames 12 \
+            --confidence-threshold 0.30 \
+            | tee .cert/e13/e13_review_builder.log
+
+      - name: Assert E13 evidence contract
+        if: success()
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = json.loads(Path('.cert/e13/source_identity.json').read_text())
+          run = json.loads(Path('.cert/e13/e12-output/e12_run_manifest.json').read_text())
+          acceptance = json.loads(Path('.cert/e13/e12-output/e12_real_video_acceptance.json').read_text())
+          review = json.loads(Path('.cert/e13/review/e13_review_manifest.json').read_text())
+
+          assert source['sha256'] == review['source']['sha256'], (source, review['source'])
+          assert run['status'] == 'completed', run
+          assert run['machine_gate'] in {'passed', 'needs_review'}, run['machine_gate']
+          assert run['final_acceptance'] == 'manual_frame_to_evidence_review_required'
+          assert acceptance['final_acceptance'] == 'manual_frame_to_evidence_review_required'
+          assert review['status'] == 'review_pack_ready', review
+          assert review['manual_verdict_required'] is True, review
+          assert review['automatic_perceptual_pass'] is False, review
+          assert review['review_frames'], review
+          assert review['character_count'] > 0, review
+          for row in review['review_frames']:
+              image = Path('.cert/e13/review') / row['comparison_image']
+              assert image.is_file() and image.stat().st_size > 0, row
+          print(json.dumps({
+              'source_sha256': source['sha256'],
+              'machine_gate': run['machine_gate'],
+              'final_acceptance': run['final_acceptance'],
+              'character_count': review['character_count'],
+              'shot_count': review['shot_count'],
+              'review_frame_count': len(review['review_frames']),
+              'module_scores': review['module_scores'],
+          }, indent=2, sort_keys=True))
+          PY
+
+      - name: Show E13 evidence
+        if: always()
+        run: |
+          cat .cert/e13/source_identity.json || true
+          cat .cert/e13/e12-output/e12_run_manifest.json || true
+          cat .cert/e13/e12-output/e12_failure_report.json || true
+          cat .cert/e13/e12-output/e12_real_video_acceptance.json || true
+          cat .cert/e13/review/e13_review_manifest.json || true
+
+      - name: Upload E13 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e13-real-pixel-frame-to-evidence
+          path: |
+            .cert/e13/source_identity.json
+            .cert/e13/e12_runner.log
+            .cert/e13/e13_review_builder.log
+            .cert/e13/e12-output/e12_run_manifest.json
+            .cert/e13/e12-output/e12_failure_report.json
+            .cert/e13/e12-output/e12_real_video_acceptance.json
+            .cert/e13/e12-output/validation_report.json
+            .cert/e13/e12-output/bundle.zip
+            .cert/e13/review/e13_review_manifest.json
+            .cert/e13/review/*.png
+          if-no-files-found: warn
