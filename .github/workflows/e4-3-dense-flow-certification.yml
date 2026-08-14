@@ -40,7 +40,7 @@ jobs:
           pip install "mmengine>=0.7.1,<1.0.0"
           pip install "mmcv==2.1.0" -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html
           pip install "mmdet==3.3.0"
-          pip install "jsonschema>=4.18.0" "scenedetect>=0.6.7,<0.7"
+          pip install "pydantic>=2.0.0" "jsonschema>=4.18.0" "scenedetect>=0.6.7,<0.7"
           pip install -e . --no-deps
 
       - name: Resolve fixed OpenMMLab configs
