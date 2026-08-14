@@ -22,8 +22,11 @@ def _sha256(content: bytes) -> str:
 
 
 def sidecar_bytes(value: Any) -> bytes:
-    if isinstance(value, (str, os.PathLike)) and os.path.isfile(str(value)):
-        with open(value, "rb") as handle:
+    if isinstance(value, (str, os.PathLike)):
+        path = str(value)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"sidecar file path is missing: {path}")
+        with open(path, "rb") as handle:
             return handle.read()
     if isinstance(value, bytes):
         return value
@@ -203,6 +206,9 @@ def validate_blueprint_artifacts(
         if not isinstance(uri, str) or not _safe_artifact_uri(uri):
             errors.append(f"sidecar path is not a safe artifacts/ URI: {uri!r}")
             continue
+        value = sidecars[uri]
+        if isinstance(value, (str, os.PathLike)) and not os.path.isfile(str(value)):
+            errors.append(f"sidecar file path is missing for {uri}: {value}")
         if uri not in referenced and uri != "artifacts/normalized/analysis_cfr.mp4":
             warnings.append(f"unreferenced sidecar artifact: {uri}")
 
