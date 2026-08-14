@@ -1,4 +1,1 @@
 extend = "pyproject.toml"
-
-[lint.per-file-ignores]
-"packages/pipeline_core/e4_media_pipeline.py" = ["F821"]
