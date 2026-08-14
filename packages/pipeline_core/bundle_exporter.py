@@ -29,7 +29,11 @@ def create_bundle_zip(
     output_zip_path: str,
 ) -> str:
     """Assemble and then re-verify a physical Video Blueprint bundle ZIP."""
-    resolved_sidecars = resolve_sidecar_bytes(blueprint_data, sidecars)
+    try:
+        resolved_sidecars = resolve_sidecar_bytes(blueprint_data, sidecars)
+    except OSError as exc:
+        raise ArtifactIntegrityError(str(exc)) from exc
+
     preflight = require_blueprint_artifacts(blueprint_data, resolved_sidecars)
     report = dict(validation_report)
     report["artifact_integrity"] = preflight
