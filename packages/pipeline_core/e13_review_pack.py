@@ -146,10 +146,10 @@ def _normalized_analysis_media(archive: zipfile.ZipFile) -> tuple[str, bytes, st
 
     manifest = json.loads(raw_manifest)
     if not isinstance(manifest, dict):
-        raise RuntimeError("bundle_manifest.json must contain an object")
+        raise TypeError("bundle_manifest.json must contain an object")
     raw_files = manifest.get("files")
     if not isinstance(raw_files, list):
-        raise RuntimeError("bundle_manifest.json is missing files[]")
+        raise TypeError("bundle_manifest.json is missing files[]")
 
     candidates: list[tuple[str, str]] = []
     for entry in raw_files:
