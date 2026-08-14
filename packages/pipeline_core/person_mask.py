@@ -29,7 +29,7 @@ def encode_binary_rle(mask: np.ndarray) -> dict[str, Any]:
 def decode_binary_rle(payload: dict[str, Any]) -> np.ndarray:
     """Decode canonical/legacy person-mask RLE envelopes without changing codec semantics."""
     if not isinstance(payload, dict):
-        raise ValueError("RLE payload must be an object")
+        raise TypeError("RLE payload must be an object")
     counts = payload.get("counts")
     if not isinstance(counts, list) or not all(isinstance(value, int) for value in counts):
         raise ValueError("RLE counts must be an integer array")
