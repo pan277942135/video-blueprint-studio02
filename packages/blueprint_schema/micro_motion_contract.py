@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 _ALLOWED_KINDS = {"periodic_micro_motion", "unclassified", "not_detected"}
 
 
@@ -167,7 +166,7 @@ def validate_micro_motion_contract(blueprint: dict[str, Any]) -> list[str]:
             "detrended_signal_ref": ("detrended_signal", "signal_valid", "body_local_unit"),
             "vertical_displacement_ref": ("vertical_displacement", "vertical_valid", "body_local_unit"),
             "velocity_ref": ("velocity", "velocity_valid", "body_local_unit_per_frame"),
-            "acceleration_ref": ("acceleration", "velocity_valid", "body_local_unit_per_frame2"),
+            "acceleration_ref": ("acceleration", "acceleration_valid", "body_local_unit_per_frame2"),
         }
         concrete_refs: list[dict[str, Any]] = []
         for field, (array_key, valid_key, unit) in refs.items():
