@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import pathlib
+import tempfile
 import zipfile
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,8 @@ COCO17_EDGES: tuple[tuple[int, int], ...] = (
     (1, 3),
     (2, 4),
 )
+
+_VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 
 
 @dataclass(frozen=True)
@@ -73,16 +76,25 @@ def select_review_frames(blueprint: dict[str, Any], *, max_frames: int = 12) -> 
             )
 
     if not selected:
-        raw_source = blueprint.get("source_video")
-        source: dict[str, Any] = raw_source if isinstance(raw_source, dict) else {}
-        frame_count = source.get("source_frame_count")
-        duration_us = source.get("duration_us")
+        raw_timebase = blueprint.get("timebase")
+        timebase: dict[str, Any] = raw_timebase if isinstance(raw_timebase, dict) else {}
+        frame_count = timebase.get("frame_count")
+        frame_duration_us = timebase.get("frame_duration_us")
+
+        if not isinstance(frame_count, int) or frame_count <= 0:
+            raw_source = blueprint.get("source_video")
+            source: dict[str, Any] = raw_source if isinstance(raw_source, dict) else {}
+            frame_count = source.get("source_frame_count")
+            duration_us = source.get("duration_us")
+            if isinstance(frame_count, int) and frame_count > 1 and isinstance(duration_us, int):
+                frame_duration_us = duration_us / (frame_count - 1)
+
         if isinstance(frame_count, int) and frame_count > 0:
             fallback = sorted({0, max(0, (frame_count - 1) // 2), frame_count - 1})
             for frame_idx in fallback:
                 time_us = None
-                if isinstance(duration_us, int) and frame_count > 1:
-                    time_us = round(duration_us * frame_idx / (frame_count - 1))
+                if isinstance(frame_duration_us, (int, float)):
+                    time_us = round(float(frame_duration_us) * frame_idx)
                 selected[frame_idx] = ReviewFrame(
                     frame_idx=frame_idx,
                     time_us=time_us,
@@ -124,6 +136,54 @@ def _npz_array(archive: zipfile.ZipFile, ref: dict[str, Any] | None) -> np.ndarr
         if array_key not in payload.files:
             return None
         return np.array(payload[array_key], copy=True)
+
+
+def _normalized_analysis_media(archive: zipfile.ZipFile) -> tuple[str, bytes, str]:
+    try:
+        raw_manifest = archive.read("bundle_manifest.json")
+    except KeyError as exc:
+        raise RuntimeError("Bundle is missing bundle_manifest.json") from exc
+
+    manifest = json.loads(raw_manifest)
+    if not isinstance(manifest, dict):
+        raise RuntimeError("bundle_manifest.json must contain an object")
+    raw_files = manifest.get("files")
+    if not isinstance(raw_files, list):
+        raise RuntimeError("bundle_manifest.json is missing files[]")
+
+    candidates: list[tuple[str, str]] = []
+    for entry in raw_files:
+        if not isinstance(entry, dict):
+            continue
+        raw_path = entry.get("path")
+        raw_sha256 = entry.get("sha256")
+        if not isinstance(raw_path, str) or not isinstance(raw_sha256, str):
+            continue
+        suffix = pathlib.PurePosixPath(raw_path).suffix.lower()
+        if raw_path.startswith("artifacts/normalized/") and suffix in _VIDEO_SUFFIXES:
+            candidates.append((raw_path, raw_sha256))
+
+    preferred = [item for item in candidates if pathlib.PurePosixPath(item[0]).name == "analysis_cfr.mp4"]
+    if len(preferred) == 1:
+        uri, expected_sha256 = preferred[0]
+    elif len(candidates) == 1:
+        uri, expected_sha256 = candidates[0]
+    elif not candidates:
+        raise RuntimeError("Bundle contains no normalized analysis video")
+    else:
+        raise RuntimeError(f"Bundle contains ambiguous normalized analysis videos: {candidates}")
+
+    try:
+        payload = archive.read(uri)
+    except KeyError as exc:
+        raise RuntimeError(f"Bundle manifest references missing normalized media: {uri}") from exc
+    actual_sha256 = hashlib.sha256(payload).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise RuntimeError(
+            "normalized analysis media SHA256 does not match Bundle manifest: "
+            f"{actual_sha256} != {expected_sha256}"
+        )
+    return uri, payload, actual_sha256
 
 
 def _draw_character_evidence(
@@ -223,6 +283,7 @@ def build_review_pack(
                 f"{video_sha256} != {expected_source_sha256}"
             )
 
+        analysis_media_uri, analysis_media_bytes, analysis_media_sha256 = _normalized_analysis_media(archive)
         review_frames = select_review_frames(blueprint, max_frames=max_frames)
         character_payloads: list[dict[str, Any]] = []
         for character in blueprint.get("characters", []):
@@ -245,19 +306,33 @@ def build_review_pack(
                 }
             )
 
-        capture = cv2.VideoCapture(str(video_path))
-        if not capture.isOpened():
-            raise RuntimeError(f"unable to open video: {video_path}")
-
+        suffix = pathlib.PurePosixPath(analysis_media_uri).suffix or ".mp4"
+        temp_path: pathlib.Path | None = None
+        capture: cv2.VideoCapture | None = None
         frame_rows: list[dict[str, Any]] = []
         try:
+            with tempfile.NamedTemporaryFile(
+                prefix="e13_analysis_",
+                suffix=suffix,
+                dir=output_dir,
+                delete=False,
+            ) as handle:
+                handle.write(analysis_media_bytes)
+                temp_path = pathlib.Path(handle.name)
+
+            capture = cv2.VideoCapture(str(temp_path))
+            if not capture.isOpened():
+                raise RuntimeError(f"unable to open normalized analysis video: {analysis_media_uri}")
+
             for review_frame in review_frames:
                 capture.set(cv2.CAP_PROP_POS_FRAMES, review_frame.frame_idx)
-                ok, source_frame = capture.read()
-                if not ok or source_frame is None:
-                    raise RuntimeError(f"unable to decode review frame {review_frame.frame_idx}")
+                ok, analysis_frame = capture.read()
+                if not ok or analysis_frame is None:
+                    raise RuntimeError(
+                        f"unable to decode normalized analysis frame {review_frame.frame_idx}"
+                    )
 
-                evidence_frame = source_frame.copy()
+                evidence_frame = analysis_frame.copy()
                 visible_characters: list[str] = []
                 for payload in character_payloads:
                     frame_idx = review_frame.frame_idx
@@ -291,7 +366,7 @@ def build_review_pack(
                     )
 
                 label = (
-                    f"frame={review_frame.frame_idx} "
+                    f"analysis_frame={review_frame.frame_idx} "
                     f"shot={review_frame.shot_id or '-'} kind={review_frame.kind}"
                 )
                 cv2.putText(
@@ -305,11 +380,11 @@ def build_review_pack(
                     cv2.LINE_AA,
                 )
 
-                target_height = max(source_frame.shape[0], evidence_frame.shape[0])
+                target_height = max(analysis_frame.shape[0], evidence_frame.shape[0])
                 comparison = np.hstack(
-                    [_fit_height(source_frame, target_height), _fit_height(evidence_frame, target_height)]
+                    [_fit_height(analysis_frame, target_height), _fit_height(evidence_frame, target_height)]
                 )
-                output_name = f"frame_{review_frame.frame_idx:06d}_source_vs_evidence.png"
+                output_name = f"frame_{review_frame.frame_idx:06d}_analysis_vs_evidence.png"
                 output_path = output_dir / output_name
                 if not cv2.imwrite(str(output_path), comparison):
                     raise RuntimeError(f"unable to write review image: {output_path}")
@@ -325,10 +400,15 @@ def build_review_pack(
                     }
                 )
         finally:
-            capture.release()
+            if capture is not None:
+                capture.release()
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
 
     raw_quality = blueprint.get("quality")
     quality: dict[str, Any] = raw_quality if isinstance(raw_quality, dict) else {}
+    raw_timebase = blueprint.get("timebase")
+    timebase: dict[str, Any] = raw_timebase if isinstance(raw_timebase, dict) else {}
     manifest: dict[str, Any] = {
         "status": "review_pack_ready",
         "manual_verdict_required": True,
@@ -340,14 +420,23 @@ def build_review_pack(
             "duration_us": source.get("duration_us"),
             "source_frame_count": source.get("source_frame_count"),
         },
+        "analysis_media": {
+            "bundle_uri": analysis_media_uri,
+            "sha256": analysis_media_sha256,
+            "frame_count": timebase.get("frame_count"),
+            "fps_num": timebase.get("fps_num"),
+            "fps_den": timebase.get("fps_den"),
+            "timeline": "normalized_analysis_cfr",
+        },
         "bundle": {"path": str(bundle_path), "sha256": bundle_sha256},
         "character_count": len(blueprint.get("characters", [])),
         "shot_count": len(blueprint.get("shots", [])),
         "module_scores": quality.get("module_scores", {}),
         "review_frames": frame_rows,
         "review_instructions": [
-            "Compare the left source frame with the right evidence overlay.",
+            "Compare the left normalized analysis frame with the right evidence overlay from the same frame index.",
             "Reject incorrect person boxes, pose geometry, missed people, duplicated tracks, or evidence attached to the wrong subject.",
+            "The raw source SHA is verified separately; evidence overlays must be reviewed on the normalized analysis timeline used by the pipeline.",
             "A green machine gate is not a perceptual acceptance result; record a manual verdict separately.",
         ],
     }
