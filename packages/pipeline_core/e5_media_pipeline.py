@@ -8,7 +8,10 @@ from typing import Any
 import cv2
 
 from packages.pipeline_core.camera_motion import CameraMotionConfig, CameraMotionError, run_camera_motion
+from packages.pipeline_core.dense_flow import DenseFlowConfig
 from packages.pipeline_core.e4_media_pipeline import run_e4_media_pipeline
+from packages.pipeline_core.person_mask import PersonMaskSegmenter
+from packages.pipeline_core.sparse_motion import SparseMotionConfig
 
 
 def _camera_hash(current: str, config: CameraMotionConfig) -> str:
@@ -21,6 +24,9 @@ def run_e5_media_pipeline(
     video_sha256: str,
     video_path: str,
     *,
+    person_mask_segmenter: PersonMaskSegmenter | None = None,
+    point_track_config: SparseMotionConfig | None = None,
+    dense_flow_config: DenseFlowConfig | None = None,
     camera_motion_config: CameraMotionConfig | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     blueprint, sidecars = run_e4_media_pipeline(
@@ -28,6 +34,9 @@ def run_e5_media_pipeline(
         video_file_name=video_file_name,
         video_sha256=video_sha256,
         video_path=video_path,
+        person_mask_segmenter=person_mask_segmenter,
+        point_track_config=point_track_config,
+        dense_flow_config=dense_flow_config,
     )
     if camera_motion_config is None:
         camera_motion_config = CameraMotionConfig.from_environment()
