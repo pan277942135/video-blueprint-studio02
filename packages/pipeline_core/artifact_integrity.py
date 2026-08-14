@@ -239,15 +239,21 @@ def validate_blueprint_artifacts(
         if not isinstance(uri, str) or uri not in resolved:
             continue
         content = resolved[uri]
-        expected = ref.get("checksum_sha256")
-        if not isinstance(expected, str):
-            expected = ref.get("sha256")
-        if isinstance(expected, str):
-            key = (uri, expected)
+        checksum_value = ref.get("checksum_sha256")
+        sha_value = ref.get("sha256")
+        expected_hash: str | None
+        if isinstance(checksum_value, str):
+            expected_hash = checksum_value
+        elif isinstance(sha_value, str):
+            expected_hash = sha_value
+        else:
+            expected_hash = None
+        if expected_hash is not None:
+            key = (uri, expected_hash)
             if key not in checked_hashes:
                 actual = _sha256(content)
-                if actual != expected:
-                    errors.append(f"{path}: SHA256 mismatch for {uri}: {actual} != {expected}")
+                if actual != expected_hash:
+                    errors.append(f"{path}: SHA256 mismatch for {uri}: {actual} != {expected_hash}")
                 checked_hashes.add(key)
         artifact_format = ref.get("format")
         if artifact_format == "npz":
@@ -288,8 +294,10 @@ def verify_bundle_zip(bundle_path: str) -> dict[str, Any]:
         if len(names) != len(set(names)):
             errors.append("bundle contains duplicate ZIP paths")
         for name in names:
-            path = PurePosixPath(name)
-            if path.is_absolute() or "\\" in name or any(part in {"", ".", ".."} for part in path.parts):
+            archive_path = PurePosixPath(name)
+            if archive_path.is_absolute() or "\\" in name or any(
+                part in {"", ".", ".."} for part in archive_path.parts
+            ):
                 errors.append(f"bundle contains unsafe ZIP path: {name!r}")
         required = {"blueprint.json", "validation_report.json", "bundle_manifest.json"}
         missing_core = sorted(required.difference(names))
@@ -316,22 +324,22 @@ def verify_bundle_zip(bundle_path: str) -> dict[str, Any]:
             if not isinstance(row, dict):
                 errors.append("bundle manifest file row must be an object")
                 continue
-            path = row.get("path")
-            if not isinstance(path, str):
+            manifest_path = row.get("path")
+            if not isinstance(manifest_path, str):
                 errors.append("bundle manifest file row path must be a string")
                 continue
-            if path in listed_paths:
-                errors.append(f"bundle manifest repeats path: {path}")
+            if manifest_path in listed_paths:
+                errors.append(f"bundle manifest repeats path: {manifest_path}")
                 continue
-            listed_paths.add(path)
-            if path not in names:
-                errors.append(f"bundle manifest path missing from ZIP: {path}")
+            listed_paths.add(manifest_path)
+            if manifest_path not in names:
+                errors.append(f"bundle manifest path missing from ZIP: {manifest_path}")
                 continue
-            content = archive.read(path)
+            content = archive.read(manifest_path)
             if row.get("size") != len(content):
-                errors.append(f"bundle manifest size mismatch for {path}")
+                errors.append(f"bundle manifest size mismatch for {manifest_path}")
             if row.get("sha256") != _sha256(content):
-                errors.append(f"bundle manifest SHA256 mismatch for {path}")
+                errors.append(f"bundle manifest SHA256 mismatch for {manifest_path}")
         if manifest.get("file_count") != len(names):
             errors.append("bundle manifest file_count does not equal ZIP entry count")
         expected_listed = set(names).difference({"bundle_manifest.json"})
