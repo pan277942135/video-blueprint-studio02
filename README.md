@@ -38,7 +38,7 @@ Higher evidence stages are opt-in and fail closed through configuration gates. A
 - `ffmpeg` / `ffprobe`
 - Node.js for the applet runtime
 - Docker / Docker Compose when using the containerized path
-- Approved/pinned CV model dependencies and weights for real higher-stage inference
+- Approved/pinned CV model dependencies for real higher-stage inference (`mmdet`, `mmpose`, MediaPipe runtime)
 
 ## Local engineering checks
 
@@ -78,7 +78,19 @@ It enables sparse point motion, dense flow, camera motion, body-local frame, sur
 
 ## E12 real-video acceptance
 
-Generate a production Bundle with the normal production runtime, then create the machine evidence report:
+The preferred representative-video path is now one command once the approved CV Python dependencies are installed:
+
+```bash
+python scripts/run_real_video_e12.py \
+  --video /path/to/source.mp4 \
+  --output-dir .e12
+```
+
+The runner automatically resolves the installed RTMDet / RTMPose / RTMDet-Ins configs, downloads any missing approved model/task assets into `.e12/runtime`, verifies every asset against its approved SHA256, refuses to overwrite a mismatched existing asset, enables E3.2 plus E4-E9 together, writes and physically verifies `bundle.zip`, and emits the E12 diagnostics. If execution aborts, it preserves `e12_failure_report.json` plus an updated `e12_run_manifest.json` containing the failed phase and traceback.
+
+For controlled/offline environments, all eight runtime paths may still be supplied explicitly. Partial explicit runtime configuration is rejected so the run cannot silently mix controlled and auto-bootstrapped assets.
+
+An already-generated production Bundle can also be evaluated without rerunning inference:
 
 ```bash
 python scripts/evaluate_real_video_e12.py \
