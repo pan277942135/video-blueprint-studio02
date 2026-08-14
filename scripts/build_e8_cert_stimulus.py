@@ -5,6 +5,7 @@ import json
 import math
 import pathlib
 import sys
+from typing import Any
 
 import cv2
 import numpy as np
@@ -54,12 +55,12 @@ def _draw_tracking_texture(
 ) -> tuple[np.ndarray, int]:
     textured = image.copy()
     height, width = image.shape[:2]
-    step_x = max(5, int(round(sigma_x * 0.30)))
-    step_y = max(5, int(round(sigma_y * 0.30)))
-    x_min = max(2, int(math.floor(float(center[0] - 1.6 * sigma_x))))
-    x_max = min(width - 3, int(math.ceil(float(center[0] + 1.6 * sigma_x))))
-    y_min = max(2, int(math.floor(float(center[1] - 1.6 * sigma_y))))
-    y_max = min(height - 3, int(math.ceil(float(center[1] + 1.6 * sigma_y))))
+    step_x = max(5, round(sigma_x * 0.30))
+    step_y = max(5, round(sigma_y * 0.30))
+    x_min = max(2, math.floor(float(center[0] - 1.6 * sigma_x)))
+    x_max = min(width - 3, math.ceil(float(center[0] + 1.6 * sigma_x)))
+    y_min = max(2, math.floor(float(center[1] - 1.6 * sigma_y)))
+    y_max = min(height - 3, math.ceil(float(center[1] + 1.6 * sigma_y)))
     dot_count = 0
     for y in range(y_min, y_max + 1, step_y):
         for x in range(x_min, x_max + 1, step_x):
@@ -84,6 +85,9 @@ def main() -> int:
     if image is None:
         raise SystemExit(f"could not decode human sample: {image_path}")
 
+    # MMEngine's default scope is process-global. Finish RTMDet inference before
+    # RTMPose is initialized so the pose backend cannot switch the active scope
+    # to mmpose while mmdet is still building its inference transform pipeline.
     detector = RTMDetPersonDetector(
         RTMDetBackendConfig(
             config_path=str(pathlib.Path(args.det_config).resolve()),
@@ -94,6 +98,10 @@ def main() -> int:
         ),
         weights_approved=True,
     )
+    detections = detector.detect(image, 0)
+    if not detections:
+        raise SystemExit("certified RTMDet found no person in official human sample")
+
     pose_estimator = RTMPosePoseEstimator(
         RTMPoseBackendConfig(
             config_path=str(pathlib.Path(args.pose_config).resolve()),
@@ -104,11 +112,7 @@ def main() -> int:
         ),
         weights_approved=True,
     )
-
-    detections = detector.detect(image, 0)
-    if not detections:
-        raise SystemExit("certified RTMDet found no person in official human sample")
-    candidates: list[tuple[float, object, object]] = []
+    candidates: list[tuple[float, Any, Any]] = []
     for detection in detections:
         pose = pose_estimator.estimate(image, detection.bbox_xyxy, 0, "cert_candidate")
         if pose is None:
