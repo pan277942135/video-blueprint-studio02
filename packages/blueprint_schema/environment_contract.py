@@ -127,7 +127,7 @@ def validate_environment_contract(blueprint: dict[str, Any]) -> list[str]:
         errors.append("E9 Environment Contract Violation: environment.background_mask_ref must be a TimeSeriesRef.")
     else:
         expected_mask = {
-            "format": "json",
+            "format": "rle_json",
             "dtype": "uint8",
             "shape": [frame_count, height, width],
             "axes": ["frame", "y", "x"],
