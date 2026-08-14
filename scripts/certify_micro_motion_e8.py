@@ -62,6 +62,12 @@ def _load(ref: dict, sidecars: dict, keys: tuple[str, ...]) -> dict[str, np.ndar
     return result
 
 
+def _write_result(output: pathlib.Path, result: dict) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result, indent=2))
+
+
 def main() -> int:
     args = _args()
     video = pathlib.Path(args.video).resolve()
@@ -148,6 +154,7 @@ def main() -> int:
             raise SystemExit(f"E8 evidence/privacy boundary drifted: {key}")
 
     periodic_rows: list[dict] = []
+    region_rows: list[dict] = []
     analyzed_regions = 0
     physical_signal_rows = 0
     acceleration_valid_rows = 0
@@ -196,20 +203,48 @@ def main() -> int:
                 acceleration_valid_rows += 1
                 if not isinstance(acceleration_ref, dict) or acceleration_ref.get("metadata", {}).get("valid_array_key") != "acceleration_valid":
                     raise SystemExit("E8 acceleration ref does not own its validity mask")
+
+            row = {
+                "character_id": character.get("character_id"),
+                "kind": micro.get("kind"),
+                "dominant_frequency_hz": micro.get("dominant_frequency_hz"),
+                "amplitude_norm_p50": micro.get("amplitude_norm_p50"),
+                "amplitude_px_p50": micro.get("amplitude_px_p50"),
+                "periodicity_score": micro.get("periodicity_score"),
+                "spatial_coherence": micro.get("spatial_coherence"),
+                "camera_leakage_score": micro.get("camera_leakage_score"),
+                "pose_leakage_score": micro.get("pose_leakage_score"),
+                "observation_dropout_ratio": micro.get("occlusion_ratio"),
+                "confidence": micro.get("confidence"),
+                "usable_for_generation": micro.get("usable_for_generation"),
+                "limitations": limitations,
+            }
+            region_rows.append(row)
             if micro.get("kind") == "periodic_micro_motion":
-                periodic_rows.append(
-                    {
-                        "character_id": character.get("character_id"),
-                        "dominant_frequency_hz": micro.get("dominant_frequency_hz"),
-                        "periodicity_score": micro.get("periodicity_score"),
-                        "spatial_coherence": micro.get("spatial_coherence"),
-                        "camera_leakage_score": micro.get("camera_leakage_score"),
-                        "pose_leakage_score": micro.get("pose_leakage_score"),
-                        "observation_dropout_ratio": micro.get("occlusion_ratio"),
-                        "confidence": micro.get("confidence"),
-                        "usable_for_generation": micro.get("usable_for_generation"),
-                    }
-                )
+                periodic_rows.append(row)
+
+    diagnostics = {
+        "status": "diagnostic",
+        "job_id": job_id,
+        "pipeline_version": blueprint["processing"]["pipeline_version"],
+        "detector_sha256": detector_sha,
+        "pose_sha256": pose_sha,
+        "mask_checkpoint_sha256": mask_sha,
+        "micro_motion_algorithm": extension["algorithm"],
+        "target_frequency_hz": TARGET_FREQUENCY_HZ,
+        "thresholds": extension.get("thresholds"),
+        "analyzed_regions": analyzed_regions,
+        "physical_signal_rows": physical_signal_rows,
+        "region_rows": region_rows,
+        "periodic_rows": periodic_rows,
+        "physiological_inference_performed": False,
+        "identity_inference_performed": False,
+        "biometric_embedding_exported": False,
+        "new_model_weights_introduced": False,
+        "radial_expansion_emitted": False,
+        "area_change_emitted": False,
+    }
+    _write_result(output, diagnostics)
 
     if analyzed_regions <= 0 or physical_signal_rows <= 0 or acceleration_valid_rows != physical_signal_rows:
         raise SystemExit("E8 certification produced incomplete physical MicroMotion evidence")
@@ -233,29 +268,12 @@ def main() -> int:
         raise SystemExit("E8 provenance must exist and introduce no model weights")
 
     result = {
+        **diagnostics,
         "status": "passed",
-        "job_id": job_id,
-        "pipeline_version": blueprint["processing"]["pipeline_version"],
-        "detector_sha256": detector_sha,
-        "pose_sha256": pose_sha,
-        "mask_checkpoint_sha256": mask_sha,
-        "micro_motion_algorithm": extension["algorithm"],
-        "target_frequency_hz": TARGET_FREQUENCY_HZ,
-        "analyzed_regions": analyzed_regions,
-        "physical_signal_rows": physical_signal_rows,
-        "periodic_rows": periodic_rows,
         "selected_periodic_row": best,
         "frequency_error_hz": round(frequency_error, 6),
-        "physiological_inference_performed": False,
-        "identity_inference_performed": False,
-        "biometric_embedding_exported": False,
-        "new_model_weights_introduced": False,
-        "radial_expansion_emitted": False,
-        "area_change_emitted": False,
     }
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(result, indent=2))
+    _write_result(output, result)
     return 0
 
 
