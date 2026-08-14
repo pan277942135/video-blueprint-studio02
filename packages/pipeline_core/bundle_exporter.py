@@ -10,7 +10,7 @@ from packages.pipeline_core.artifact_integrity import (
     ArtifactIntegrityError,
     require_blueprint_artifacts,
     require_bundle_zip,
-    sidecar_bytes,
+    resolve_sidecar_bytes,
 )
 
 
@@ -29,7 +29,8 @@ def create_bundle_zip(
     output_zip_path: str,
 ) -> str:
     """Assemble and then re-verify a physical Video Blueprint bundle ZIP."""
-    preflight = require_blueprint_artifacts(blueprint_data, sidecars)
+    resolved_sidecars = resolve_sidecar_bytes(blueprint_data, sidecars)
+    preflight = require_blueprint_artifacts(blueprint_data, resolved_sidecars)
     report = dict(validation_report)
     report["artifact_integrity"] = preflight
     bundle_manifest_files: list[dict[str, Any]] = []
@@ -56,8 +57,8 @@ def create_bundle_zip(
                 }
             )
 
-            for sidecar_path in sorted(sidecars):
-                content = sidecar_bytes(sidecars[sidecar_path])
+            for sidecar_path in sorted(resolved_sidecars):
+                content = resolved_sidecars[sidecar_path]
                 zip_file.writestr(sidecar_path, content)
                 bundle_manifest_files.append(
                     {
