@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import math
 import pathlib
 import zipfile
 from dataclasses import dataclass
