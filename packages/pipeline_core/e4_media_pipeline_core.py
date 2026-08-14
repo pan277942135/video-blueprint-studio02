@@ -7,6 +7,7 @@ from typing import Any
 
 import cv2
 
+from packages.pipeline_core.dense_flow import DenseFlowConfig, DenseFlowError, run_dense_flow
 from packages.pipeline_core.person_mask import (
     PersonMaskError,
     PersonMaskSegmenter,
@@ -27,6 +28,10 @@ def _point_hash(current: str, config: SparseMotionConfig) -> str:
     return hashlib.sha256(f"{current}|point-tracks:{config.token()}".encode()).hexdigest()
 
 
+def _dense_hash(current: str, config: DenseFlowConfig) -> str:
+    return hashlib.sha256(f"{current}|dense-flow:{config.token()}".encode()).hexdigest()
+
+
 def run_e4_media_pipeline(
     job_id: str,
     video_file_name: str,
@@ -35,8 +40,9 @@ def run_e4_media_pipeline(
     *,
     person_mask_segmenter: PersonMaskSegmenter | None = None,
     point_track_config: SparseMotionConfig | None = None,
+    dense_flow_config: DenseFlowConfig | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run E4.1 masks and optional E4.2 image-space sparse motion."""
+    """Run E4.1 masks, E4.2 sparse tracks, and optional E4.3 global dense flow."""
     blueprint, sidecars = run_real_media_pipeline(
         job_id=job_id,
         video_file_name=video_file_name,
@@ -47,21 +53,26 @@ def run_e4_media_pipeline(
         person_mask_segmenter = RTMDetInsPersonMaskSegmenter.from_environment()
     if point_track_config is None:
         point_track_config = SparseMotionConfig.from_environment()
-    if person_mask_segmenter is None and point_track_config is None:
+    if dense_flow_config is None:
+        dense_flow_config = DenseFlowConfig.from_environment()
+    if person_mask_segmenter is None and point_track_config is None and dense_flow_config is None:
         return blueprint, sidecars
 
-    characters = blueprint.get("characters")
-    if not isinstance(characters, list) or not characters:
-        raise PersonMaskError("E4 requires existing anonymous person tracks")
     normalized_path = sidecars.get("artifacts/normalized/analysis_cfr.mp4")
     if not isinstance(normalized_path, (str, os.PathLike)) or not os.path.isfile(str(normalized_path)):
-        raise PersonMaskError("E4 requires the normalized CFR analysis video")
-
+        raise DenseFlowError("E4 requires the normalized CFR analysis video")
     normalized = Path(str(normalized_path))
     try:
         artifact_root = str(normalized.parents[2])
     except IndexError as exc:
-        raise PersonMaskError("Could not resolve E4 artifact root") from exc
+        raise DenseFlowError("Could not resolve E4 artifact root") from exc
+
+    characters = blueprint.get("characters")
+    if person_mask_segmenter is not None or point_track_config is not None:
+        if not isinstance(characters, list) or not characters:
+            raise PersonMaskError("E4.1/E4.2 require existing anonymous person tracks")
+    if not isinstance(characters, list):
+        characters = []
 
     frame_count = int(blueprint["timebase"]["frame_count"])
     processing = blueprint["processing"]
@@ -141,6 +152,40 @@ def run_e4_media_pipeline(
             {
                 "module": "point_tracks",
                 "tool": "OpenCV Shi-Tomasi + pyramidal Lucas-Kanade",
+                "version": cv2.__version__,
+                "code_commit": os.environ.get("GITHUB_SHA"),
+                "weights_sha256": None,
+                "config_hash": str(processing["config_hash"]),
+                "license": "Apache-2.0",
+            }
+        )
+
+    if dense_flow_config is not None:
+        dense_extension, dense_sidecars, dense_report, dense_quality = run_dense_flow(
+            str(normalized_path),
+            shots=blueprint.get("shots", []),
+            frame_count=frame_count,
+            output_dir=artifact_root,
+            config=dense_flow_config,
+        )
+        sidecars.update(dense_sidecars)
+        blueprint["artifacts"]["reports"].append(dense_report)
+        blueprint["extensions"]["e4_dense_flow"] = dense_extension
+        processing["pipeline_version"] = "0.4.0-e4.3"
+        processing["config_hash"] = _dense_hash(str(processing["config_hash"]), dense_flow_config)
+        processing["stages"].append(
+            {
+                "name": "dense_flow",
+                "status": "succeeded",
+                "progress": 1.0,
+                "message": "E4.3 emitted global image-space dense optical-flow evidence",
+            }
+        )
+        blueprint["quality"]["module_scores"]["dense_flow"] = float(dense_quality["score"])
+        blueprint["provenance"]["tools"].append(
+            {
+                "module": "dense_flow",
+                "tool": "OpenCV Farneback dense optical flow",
                 "version": cv2.__version__,
                 "code_commit": os.environ.get("GITHUB_SHA"),
                 "weights_sha256": None,
