@@ -68,9 +68,11 @@ def run_e4_media_pipeline(
         raise DenseFlowError("Could not resolve E4 artifact root") from exc
 
     characters = blueprint.get("characters")
-    if person_mask_segmenter is not None or point_track_config is not None:
-        if not isinstance(characters, list) or not characters:
-            raise PersonMaskError("E4.1/E4.2 require existing anonymous person tracks")
+    if (
+        (person_mask_segmenter is not None or point_track_config is not None)
+        and (not isinstance(characters, list) or not characters)
+    ):
+        raise PersonMaskError("E4.1/E4.2 require existing anonymous person tracks")
     if not isinstance(characters, list):
         characters = []
 
