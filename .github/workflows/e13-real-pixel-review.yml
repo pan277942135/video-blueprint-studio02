@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 90
     env:
       E13_SAMPLE_URL: https://user-images.githubusercontent.com/87690686/164970135-b14e424c-765a-4180-9bc8-fa8d6abc5510.mp4
-      E13_SAMPLE_SHA256: TO_BE_PINNED_AFTER_FIRST_RUN
+      E13_SAMPLE_SHA256: 0dda8a5f16c67992330a1a8534cf0bfefeb5e0f2aec438577a9e1dbace773275
     steps:
       - uses: actions/checkout@v4
 
