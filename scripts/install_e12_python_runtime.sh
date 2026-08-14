@@ -7,17 +7,19 @@ PIP=("${PYTHON_BIN}" -m pip)
 "${PIP[@]}" install --upgrade pip
 
 # The certified OpenMMLab/Torch CPU stack uses extensions built against NumPy 1.x.
-# Keep one cv2 provider: opencv-contrib-python also satisfies MediaPipe's cv2 needs.
+# Keep the same opencv-python distribution already certified by E11. MediaPipe is
+# installed without dependency resolution below so it cannot add a second cv2
+# distribution or replace this NumPy/OpenCV pair.
 "${PIP[@]}" install \
   "numpy==1.26.4" \
-  "opencv-contrib-python==4.10.0.84"
+  "opencv-python==4.10.0.84"
 
 "${PIP[@]}" install \
   --index-url https://download.pytorch.org/whl/cpu \
   "torch==2.1.0" \
   "torchvision==0.16.0"
 
-"${PIP[@]}" install "mmengine>=0.7.1,<1.0.0"
+"${PIP[@]}" install "mmengine==0.10.7"
 "${PIP[@]}" install \
   "mmcv==2.1.0" \
   -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html
@@ -31,10 +33,11 @@ PIP=("${PYTHON_BIN}" -m pip)
   scipy \
   "xtcocotools>=1.12"
 
-# mediapipe==0.10.35 currently resolves an unconstrained OpenCV 5 / NumPy 2 pair.
-# That breaks the certified Torch/MMCV NumPy-1.x ABI. Install the approved MediaPipe
-# wheel without dependency resolution, then add only the non-cv2 dependencies needed
-# by its Python runtime while retaining the certified NumPy/OpenCV pair above.
+# mediapipe==0.10.35 currently resolves an unconstrained opencv-contrib-python
+# distribution whose latest wheel requires NumPy 2.x. That breaks the certified
+# Torch/MMCV NumPy-1.x ABI. E3.2 uses MediaPipe Tasks APIs and the approved runtime
+# is therefore installed without dependency resolution; non-cv2 dependencies are
+# supplied explicitly while cv2 remains the E11-certified opencv-python wheel.
 "${PIP[@]}" install "mediapipe==0.10.35" --no-deps
 "${PIP[@]}" install \
   "absl-py~=2.3" \
@@ -51,6 +54,8 @@ PIP=("${PYTHON_BIN}" -m pip)
 "${PIP[@]}" install -e . --no-deps
 
 "${PYTHON_BIN}" - <<'PY'
+from importlib.metadata import PackageNotFoundError, version
+
 import cv2
 import mediapipe as mp
 import mmdet
@@ -61,9 +66,11 @@ import torch
 versions = {
     "mediapipe": mp.__version__,
     "mmdet": mmdet.__version__,
+    "mmengine": version("mmengine"),
     "mmpose": mmpose.__version__,
     "numpy": np.__version__,
     "opencv": cv2.__version__,
+    "opencv_distribution": version("opencv-python"),
     "torch": torch.__version__,
 }
 for name, value in versions.items():
@@ -71,8 +78,17 @@ for name, value in versions.items():
 
 assert versions["mediapipe"] == "0.10.35", versions
 assert versions["mmdet"] == "3.3.0", versions
+assert versions["mmengine"] == "0.10.7", versions
 assert versions["mmpose"] == "1.3.2", versions
 assert versions["numpy"] == "1.26.4", versions
+assert versions["opencv_distribution"] == "4.10.0.84", versions
 assert versions["opencv"].startswith("4.10.0"), versions
 assert versions["torch"].startswith("2.1.0"), versions
+
+for conflicting in ("opencv-contrib-python", "opencv-python-headless"):
+    try:
+        found = version(conflicting)
+    except PackageNotFoundError:
+        continue
+    raise AssertionError(f"conflicting cv2 distribution installed: {conflicting}=={found}")
 PY
