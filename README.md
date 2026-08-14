@@ -86,7 +86,7 @@ sudo apt-get install -y ffmpeg libegl1 libgles2 libgl1
 bash scripts/install_e12_python_runtime.sh
 ```
 
-The installer deliberately keeps NumPy 1.26.4 and one OpenCV contrib distribution so the certified Torch/MMCV ABI and MediaPipe runtime can coexist. It finishes by importing the composed stack and asserting the approved package versions; a mismatch fails immediately instead of falling through to video inference.
+The installer deliberately keeps NumPy 1.26.4 and the E11-certified `opencv-python==4.10.0.84` distribution so the Torch/MMCV ABI remains stable. MediaPipe is installed without dependency resolution and uses that same cv2 runtime, preventing pip from introducing a second OpenCV 5 distribution and NumPy 2.x. The installer finishes by importing the composed stack and asserting the approved package versions; a mismatch fails immediately instead of falling through to video inference.
 
 Then the preferred representative-video path is one command:
 
