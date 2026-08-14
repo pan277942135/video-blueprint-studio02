@@ -1,74 +1,91 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 import zipfile
 from typing import Any
 
+from packages.pipeline_core.artifact_integrity import (
+    ArtifactIntegrityError,
+    require_blueprint_artifacts,
+    require_bundle_zip,
+    sidecar_bytes,
+)
+
 
 def calculate_sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def _json_bytes(value: Any) -> bytes:
+    return json.dumps(value, indent=2).encode("utf-8")
+
 
 def create_bundle_zip(
     blueprint_data: dict[str, Any],
     sidecars: dict[str, Any],
     validation_report: dict[str, Any],
-    output_zip_path: str
+    output_zip_path: str,
 ) -> str:
-    """
-    Assembles a verifiable Video Blueprint bundle ZIP.
-    Contains:
-      - blueprint.json
-      - bundle_manifest.json (with SHA256 hashes of all artifacts)
-      - validation_report.json
-      - sidecars/*
-    """
+    """Assemble and then re-verify a physical Video Blueprint bundle ZIP."""
+    preflight = require_blueprint_artifacts(blueprint_data, sidecars)
+    report = dict(validation_report)
+    report["artifact_integrity"] = preflight
     bundle_manifest_files: list[dict[str, Any]] = []
 
-    with zipfile.ZipFile(output_zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
-        # 1. Write blueprint.json
-        blueprint_bytes = json.dumps(blueprint_data, indent=2).encode('utf-8')
-        zip_file.writestr('blueprint.json', blueprint_bytes)
-        bundle_manifest_files.append({
-            "path": "blueprint.json",
-            "size": len(blueprint_bytes),
-            "sha256": calculate_sha256_bytes(blueprint_bytes)
-        })
+    try:
+        with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+            blueprint_bytes = _json_bytes(blueprint_data)
+            zip_file.writestr("blueprint.json", blueprint_bytes)
+            bundle_manifest_files.append(
+                {
+                    "path": "blueprint.json",
+                    "size": len(blueprint_bytes),
+                    "sha256": calculate_sha256_bytes(blueprint_bytes),
+                }
+            )
 
-        # 2. Write validation_report.json
-        val_report_bytes = json.dumps(validation_report, indent=2).encode('utf-8')
-        zip_file.writestr('validation_report.json', val_report_bytes)
-        bundle_manifest_files.append({
-            "path": "validation_report.json",
-            "size": len(val_report_bytes),
-            "sha256": calculate_sha256_bytes(val_report_bytes)
-        })
+            validation_bytes = _json_bytes(report)
+            zip_file.writestr("validation_report.json", validation_bytes)
+            bundle_manifest_files.append(
+                {
+                    "path": "validation_report.json",
+                    "size": len(validation_bytes),
+                    "sha256": calculate_sha256_bytes(validation_bytes),
+                }
+            )
 
-        # 3. Write sidecars / artifacts
-        for sidecar_path, sidecar_content in sidecars.items():
-            if isinstance(sidecar_content, (str, os.PathLike)) and os.path.isfile(str(sidecar_content)):
-                with open(sidecar_content, "rb") as f:
-                    s_bytes = f.read()
-            elif isinstance(sidecar_content, bytes):
-                s_bytes = sidecar_content
-            else:
-                s_bytes = json.dumps(sidecar_content, indent=2).encode('utf-8')
+            for sidecar_path in sorted(sidecars):
+                content = sidecar_bytes(sidecars[sidecar_path])
+                zip_file.writestr(sidecar_path, content)
+                bundle_manifest_files.append(
+                    {
+                        "path": sidecar_path,
+                        "size": len(content),
+                        "sha256": calculate_sha256_bytes(content),
+                    }
+                )
 
-            zip_file.writestr(sidecar_path, s_bytes)
-            bundle_manifest_files.append({
-                "path": sidecar_path,
-                "size": len(s_bytes),
-                "sha256": calculate_sha256_bytes(s_bytes)
-            })
+            bundle_manifest = {
+                "bundle_version": "1.1.0",
+                "blueprint_id": blueprint_data.get("blueprint_id", "unknown"),
+                "file_count": len(bundle_manifest_files) + 1,
+                "files": bundle_manifest_files,
+            }
+            zip_file.writestr("bundle_manifest.json", _json_bytes(bundle_manifest))
 
-        # 4. Write bundle_manifest.json
-        bundle_manifest = {
-            "bundle_version": "1.0.0",
-            "blueprint_id": blueprint_data.get("blueprint_id", "unknown"),
-            "file_count": len(bundle_manifest_files) + 1,
-            "files": bundle_manifest_files
-        }
-        manifest_bytes = json.dumps(bundle_manifest, indent=2).encode('utf-8')
-        zip_file.writestr('bundle_manifest.json', manifest_bytes)
+        require_bundle_zip(output_zip_path)
+    except Exception:
+        if os.path.exists(output_zip_path):
+            os.remove(output_zip_path)
+        raise
 
     return output_zip_path
 
+
+__all__ = [
+    "ArtifactIntegrityError",
+    "calculate_sha256_bytes",
+    "create_bundle_zip",
+]
