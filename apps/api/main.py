@@ -46,7 +46,7 @@ validator = BlueprintValidator()
 def health_check():
     return {
         "status": "ok",
-        "epic": "E10",
+        "epic": "E1",
         "service": "Video Blueprint Studio API",
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
