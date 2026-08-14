@@ -303,17 +303,38 @@ def verify_bundle_zip(bundle_path: str) -> dict[str, Any]:
         missing_core = sorted(required.difference(names))
         if missing_core:
             errors.append(f"bundle missing core files: {missing_core!r}")
-            return {"valid": False, "errors": errors, "warnings": []}
+            return {
+                "valid": False,
+                "errors": errors,
+                "warnings": [],
+                "zip_entry_count": len(names),
+                "referenced_artifact_count": None,
+                "sidecar_count": None,
+            }
 
         try:
             blueprint = json.loads(archive.read("blueprint.json"))
             manifest = json.loads(archive.read("bundle_manifest.json"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             errors.append(f"bundle core JSON decode failed: {exc}")
-            return {"valid": False, "errors": errors, "warnings": []}
+            return {
+                "valid": False,
+                "errors": errors,
+                "warnings": [],
+                "zip_entry_count": len(names),
+                "referenced_artifact_count": None,
+                "sidecar_count": None,
+            }
         if not isinstance(blueprint, dict) or not isinstance(manifest, dict):
             errors.append("bundle core JSON values must be objects")
-            return {"valid": False, "errors": errors, "warnings": []}
+            return {
+                "valid": False,
+                "errors": errors,
+                "warnings": [],
+                "zip_entry_count": len(names),
+                "referenced_artifact_count": None,
+                "sidecar_count": None,
+            }
 
         files = manifest.get("files")
         if not isinstance(files, list):
@@ -354,7 +375,14 @@ def verify_bundle_zip(bundle_path: str) -> dict[str, Any]:
         artifact_result = validate_blueprint_artifacts(blueprint, zip_sidecars)
         errors.extend(artifact_result["errors"])
         warnings = list(artifact_result["warnings"])
-    return {"valid": not errors, "errors": errors, "warnings": warnings}
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "zip_entry_count": len(names),
+        "referenced_artifact_count": artifact_result["referenced_artifact_count"],
+        "sidecar_count": artifact_result["sidecar_count"],
+    }
 
 
 def require_bundle_zip(bundle_path: str) -> dict[str, Any]:
