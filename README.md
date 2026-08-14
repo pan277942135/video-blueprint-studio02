@@ -38,7 +38,7 @@ Higher evidence stages are opt-in and fail closed through configuration gates. A
 - `ffmpeg` / `ffprobe`
 - Node.js for the applet runtime
 - Docker / Docker Compose when using the containerized path
-- Approved/pinned CV model dependencies and weights for real higher-stage inference
+- Approved/pinned CV model dependencies for real higher-stage inference (`mmdet`, `mmpose`, MediaPipe runtime)
 
 ## Local engineering checks
 
@@ -78,7 +78,29 @@ It enables sparse point motion, dense flow, camera motion, body-local frame, sur
 
 ## E12 real-video acceptance
 
-Generate a production Bundle with the normal production runtime, then create the machine evidence report:
+The repository contains the same pinned CPU Python runtime bootstrap used by the E12 certification workflow. On Ubuntu/Debian, install the system libraries and certified Python stack with:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg libegl1 libgles2 libgl1
+bash scripts/install_e12_python_runtime.sh
+```
+
+The installer deliberately keeps NumPy 1.26.4 and the E11-certified `opencv-python==4.10.0.84` distribution so the Torch/MMCV ABI remains stable. MediaPipe is installed without dependency resolution and uses that same cv2 runtime, preventing pip from introducing a second OpenCV 5 distribution and NumPy 2.x. The installer finishes by importing the composed stack and asserting the approved package versions; a mismatch fails immediately instead of falling through to video inference.
+
+Then the preferred representative-video path is one command:
+
+```bash
+python scripts/run_real_video_e12.py \
+  --video /path/to/source.mp4 \
+  --output-dir .e12
+```
+
+The runner automatically resolves the installed RTMDet / RTMPose / RTMDet-Ins configs, downloads any missing approved model/task assets into `.e12/runtime`, verifies every asset against its approved SHA256, refuses to overwrite a mismatched existing asset, enables E3.2 plus E4-E9 together, writes and physically verifies `bundle.zip`, and emits the E12 diagnostics. Approved MediaPipe task downloads are additionally pinned to the object generations recorded by the E3.2 model approval, rather than trusting a moving `latest` object alone. If execution aborts, it preserves `e12_failure_report.json` plus an updated `e12_run_manifest.json` containing the failed phase and traceback.
+
+For controlled/offline environments, all eight runtime paths may still be supplied explicitly. Partial explicit runtime configuration is rejected so the run cannot silently mix controlled and auto-bootstrapped assets.
+
+An already-generated production Bundle can also be evaluated without rerunning inference:
 
 ```bash
 python scripts/evaluate_real_video_e12.py \
