@@ -114,6 +114,20 @@ def test_recursive_artifact_integrity_rejects_missing_or_unsafe_uri() -> None:
         require_blueprint_artifacts(blueprint, sidecars)
 
 
+def test_missing_local_sidecar_path_fails_closed_and_never_becomes_zip_text(tmp_path) -> None:
+    blueprint, sidecars = _fixture()
+    missing = tmp_path / "missing.png"
+    sidecars["artifacts/keyframes/frame.png"] = str(missing)
+
+    with pytest.raises(ArtifactIntegrityError, match="sidecar file path is missing"):
+        require_blueprint_artifacts(blueprint, sidecars)
+
+    output = tmp_path / "bundle.zip"
+    with pytest.raises(ArtifactIntegrityError, match="sidecar file path is missing"):
+        create_bundle_zip(blueprint, sidecars, {"valid": True, "errors": []}, str(output))
+    assert not output.exists()
+
+
 def test_bundle_exporter_reverifies_zip_bytes(tmp_path) -> None:
     blueprint, sidecars = _fixture()
     blueprint["blueprint_id"] = "test-blueprint"
