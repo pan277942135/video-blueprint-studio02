@@ -91,7 +91,7 @@ def select_review_frames(blueprint: dict[str, Any], *, max_frames: int = 12) -> 
         return rows
 
     positions = np.linspace(0, len(rows) - 1, num=max_frames)
-    indices = sorted({int(round(float(position))) for position in positions})
+    indices = sorted({round(float(position)) for position in positions})
     if len(indices) < max_frames:
         for idx in range(len(rows)):
             if idx not in indices:
@@ -132,7 +132,7 @@ def _draw_character_evidence(
     confidence_threshold: float,
 ) -> None:
     if bbox is not None and bbox.shape == (4,) and np.isfinite(bbox).all():
-        x1, y1, x2, y2 = (int(round(float(value))) for value in bbox)
+        x1, y1, x2, y2 = (round(float(value)) for value in bbox)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 2)
         cv2.putText(
             frame,
@@ -161,8 +161,8 @@ def _draw_character_evidence(
             continue
         cv2.line(
             frame,
-            (int(round(float(p1[0]))), int(round(float(p1[1])))),
-            (int(round(float(p2[0]))), int(round(float(p2[1])))),
+            (round(float(p1[0])), round(float(p1[1]))),
+            (round(float(p2[0])), round(float(p2[1]))),
             (255, 255, 255),
             1,
             cv2.LINE_AA,
@@ -173,7 +173,7 @@ def _draw_character_evidence(
             continue
         cv2.circle(
             frame,
-            (int(round(float(point[0]))), int(round(float(point[1])))),
+            (round(float(point[0])), round(float(point[1]))),
             2,
             (255, 255, 255),
             -1,
@@ -185,7 +185,7 @@ def _fit_height(image: np.ndarray, target_height: int) -> np.ndarray:
     if image.shape[0] == target_height:
         return image
     scale = target_height / image.shape[0]
-    width = max(1, int(round(image.shape[1] * scale)))
+    width = max(1, round(image.shape[1] * scale))
     return cv2.resize(image, (width, target_height), interpolation=cv2.INTER_AREA)
 
 
