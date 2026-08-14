@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 from packages.blueprint_schema import BlueprintValidator
 from packages.pipeline_core.artifact_integrity import require_blueprint_artifacts, verify_bundle_zip
 from packages.pipeline_core.bundle_exporter import create_bundle_zip
+from packages.pipeline_core.e12_run_evidence import collect_surviving_outputs
 from packages.pipeline_core.e12_runtime import (
     DETECTOR_SHA256,
     MASK_SHA256,
@@ -161,6 +162,16 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     run_manifest_path = output_dir / "e12_run_manifest.json"
     failure_path = output_dir / "e12_failure_report.json"
+    blueprint_path = output_dir / "blueprint.json"
+    validation_path = output_dir / "validation_report.json"
+    bundle_path = output_dir / "bundle.zip"
+    acceptance_path = output_dir / "e12_real_video_acceptance.json"
+    output_candidates = {
+        "blueprint": blueprint_path,
+        "validation_report": validation_path,
+        "bundle": bundle_path,
+        "acceptance_report": acceptance_path,
+    }
     job_id = str(uuid.uuid4())
     events: list[dict[str, Any]] = []
     phase = "initializing"
@@ -255,11 +266,6 @@ def main() -> int:
             "artifact_integrity": integrity,
         }
 
-        blueprint_path = output_dir / "blueprint.json"
-        validation_path = output_dir / "validation_report.json"
-        bundle_path = output_dir / "bundle.zip"
-        acceptance_path = output_dir / "e12_real_video_acceptance.json"
-
         _write_json(blueprint_path, blueprint)
         _write_json(validation_path, validation_report)
         if not valid or integrity is None:
@@ -306,6 +312,7 @@ def main() -> int:
                 "acceptance_report": str(acceptance_path),
                 "failure_report": None,
             },
+            "output_evidence": collect_surviving_outputs(output_candidates),
             "machine_gate": acceptance["machine_gate"],
             "final_acceptance": acceptance["final_acceptance"],
             "events": events,
@@ -315,6 +322,7 @@ def main() -> int:
         return 0 if acceptance["machine_gate"] != "failed" else 2
     except BaseException as exc:
         event("failed", str(exc))
+        surviving_outputs = collect_surviving_outputs(output_candidates)
         failure = {
             "status": "failed",
             "job_id": job_id,
@@ -323,6 +331,7 @@ def main() -> int:
             "error": str(exc),
             "traceback": traceback.format_exc(),
             "source_sha256": source_sha256,
+            "surviving_outputs": surviving_outputs,
             "events": events,
         }
         _write_json(failure_path, failure)
@@ -334,6 +343,7 @@ def main() -> int:
                 "phase": phase,
                 "source_sha256": source_sha256,
                 "failure_report": str(failure_path),
+                "surviving_outputs": surviving_outputs,
                 "events": events,
             },
         )

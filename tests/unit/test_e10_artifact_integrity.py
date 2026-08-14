@@ -179,8 +179,11 @@ def test_bundle_exporter_reverifies_zip_bytes(tmp_path) -> None:
     create_bundle_zip(blueprint, sidecars, {"valid": True, "errors": []}, str(output))
     result = verify_bundle_zip(str(output))
     assert result["valid"] is True
+    assert result["referenced_artifact_count"] == 3
+    assert result["sidecar_count"] == 3
 
     with zipfile.ZipFile(output, "r") as archive:
+        assert result["zip_entry_count"] == len(archive.namelist())
         report = json.loads(archive.read("validation_report.json"))
         assert report["artifact_integrity"]["valid"] is True
         manifest = json.loads(archive.read("bundle_manifest.json"))

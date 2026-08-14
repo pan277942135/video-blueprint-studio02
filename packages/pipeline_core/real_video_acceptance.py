@@ -137,6 +137,12 @@ def summarize_blueprint_acceptance(
     processing = blueprint.get("processing")
     if not isinstance(processing, dict):
         processing = {}
+
+    source_video = blueprint.get("source_video")
+    if not isinstance(source_video, dict):
+        legacy_source = blueprint.get("source")
+        source_video = legacy_source if isinstance(legacy_source, dict) else {}
+
     stage_rows = processing.get("stages")
     if not isinstance(stage_rows, list):
         stage_rows = []
@@ -434,8 +440,8 @@ def summarize_blueprint_acceptance(
         "final_acceptance": "manual_frame_to_evidence_review_required",
         "important_note": "A succeeded stage or structurally valid Bundle is not evidence that fine visual details were captured accurately.",
         "source": {
-            "file_name": blueprint.get("source", {}).get("file_name") if isinstance(blueprint.get("source"), dict) else None,
-            "sha256": blueprint.get("source", {}).get("sha256") if isinstance(blueprint.get("source"), dict) else None,
+            "file_name": source_video.get("file_name"),
+            "sha256": source_video.get("sha256"),
             "frame_count": blueprint.get("timebase", {}).get("frame_count") if isinstance(blueprint.get("timebase"), dict) else None,
             "fps_num": blueprint.get("timebase", {}).get("fps_num") if isinstance(blueprint.get("timebase"), dict) else None,
             "fps_den": blueprint.get("timebase", {}).get("fps_den") if isinstance(blueprint.get("timebase"), dict) else None,

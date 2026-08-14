@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import sys
@@ -29,6 +30,14 @@ def _args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _sha256_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main() -> int:
     args = _args()
     bundle = pathlib.Path(args.bundle).resolve()
@@ -52,9 +61,11 @@ def main() -> int:
         integrity=integrity,
         low_score_threshold=args.low_score_threshold,
     )
+    report["artifact_integrity"]["zip_entry_count"] = integrity.get("zip_entry_count")
     report["bundle"] = {
         "path": str(bundle),
         "size_bytes": bundle.stat().st_size,
+        "sha256": _sha256_file(bundle),
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

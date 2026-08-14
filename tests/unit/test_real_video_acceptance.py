@@ -7,7 +7,7 @@ def _base_blueprint() -> dict:
         for name in CORE_STAGE_NAMES
     ]
     return {
-        "source": {"file_name": "real.mp4", "sha256": "a" * 64},
+        "source_video": {"file_name": "real.mp4", "sha256": "a" * 64},
         "timebase": {"frame_count": 120, "fps_num": 30, "fps_den": 1},
         "processing": {"pipeline_version": "0.9.0-e9.1", "stages": stages},
         "quality": {
@@ -91,8 +91,33 @@ def test_clean_machine_evidence_still_requires_manual_review() -> None:
 
     assert report["machine_gate"] == "passed"
     assert report["final_acceptance"] == "manual_frame_to_evidence_review_required"
+    assert report["source"]["file_name"] == "real.mp4"
+    assert report["source"]["sha256"] == "a" * 64
+    assert report["artifact_integrity"]["referenced_artifact_count"] == 20
+    assert report["artifact_integrity"]["sidecar_count"] == 21
     assert report["surface_micro_motion"]["usable_micro_ratio"] == 1.0
     assert report["diagnostics"] == []
+
+
+def test_legacy_source_fallback_remains_readable() -> None:
+    blueprint = _base_blueprint()
+    blueprint.pop("source_video")
+    blueprint["source"] = {"file_name": "legacy.mp4", "sha256": "b" * 64}
+
+    report = summarize_blueprint_acceptance(blueprint, integrity={"valid": True, "warnings": []})
+
+    assert report["source"]["file_name"] == "legacy.mp4"
+    assert report["source"]["sha256"] == "b" * 64
+
+
+def test_canonical_source_video_wins_over_legacy_source() -> None:
+    blueprint = _base_blueprint()
+    blueprint["source"] = {"file_name": "stale-legacy.mp4", "sha256": "b" * 64}
+
+    report = summarize_blueprint_acceptance(blueprint, integrity={"valid": True, "warnings": []})
+
+    assert report["source"]["file_name"] == "real.mp4"
+    assert report["source"]["sha256"] == "a" * 64
 
 
 def test_succeeded_stage_with_zero_quality_is_not_treated_as_accurate() -> None:
