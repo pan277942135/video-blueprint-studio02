@@ -132,6 +132,8 @@ jobs:
             -movflags +faststart .cert/body_local_smoke.mp4
 
       - name: Run E2-to-E6 end-to-end certification
+        env:
+          VBS_RTMPOSE_EXPECTED_SHA256: 77ffc7e802acf10951c353e8bc68b4f05218121177ceaea163aa124436ba6fb7
         run: |
           set -o pipefail
           python scripts/certify_body_local_e6.py \
