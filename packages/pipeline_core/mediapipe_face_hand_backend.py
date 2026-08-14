@@ -23,6 +23,9 @@ from packages.pipeline_core.face_hand_refinement import (
 APPROVED_FACE_TASK_SHA256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
 APPROVED_HAND_TASK_SHA256 = "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
 APPROVED_MEDIAPIPE_VERSION = "0.10.35"
+FACE_ROI_POLICY = "adaptive_upper_body_v1"
+FACE_ROI_MIN_HEIGHT_RATIO = 0.35
+FACE_ROI_WIDTH_TO_HEIGHT = 1.25
 
 
 class MediaPipeFaceHandConfigurationError(RuntimeError):
@@ -80,6 +83,7 @@ def _config_hash(config: MediaPipeFaceHandConfig, face_sha256: str, hand_sha256:
             f"hand:{hand_sha256}",
             f"fps:{config.fps_num}/{config.fps_den}",
             f"padding:{config.crop_padding_ratio}",
+            f"face-roi:{FACE_ROI_POLICY}:{FACE_ROI_MIN_HEIGHT_RATIO}:{FACE_ROI_WIDTH_TO_HEIGHT}",
             f"face-thresholds:{config.min_face_detection_confidence}:{config.min_face_presence_confidence}:{config.min_face_tracking_confidence}",
             f"hand-thresholds:{config.min_hand_detection_confidence}:{config.min_hand_presence_confidence}:{config.min_hand_tracking_confidence}",
         ]
@@ -102,6 +106,31 @@ def _validate_config(config: MediaPipeFaceHandConfig) -> None:
     ):
         if not 0.0 <= value <= 1.0:
             raise MediaPipeFaceHandConfigurationError(f"{label} must be within [0, 1]")
+
+
+def _face_search_bbox(
+    bbox_xyxy: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Return an adaptive upper-body search ROI for FaceLandmarker.
+
+    Near-square / portrait crops keep the complete person box. Tall full-body
+    boxes retain their full width but shorten the vertical search region so a
+    small face occupies more FaceLandmarker input pixels. This changes only the
+    search ROI; model artifacts and confidence thresholds remain unchanged.
+    """
+    x1, y1, x2, y2 = (float(value) for value in bbox_xyxy)
+    if not all(np.isfinite([x1, y1, x2, y2])) or x2 <= x1 or y2 <= y1:
+        raise MediaPipeFaceHandConfigurationError("Anonymous person bbox is invalid for face ROI selection")
+    width = x2 - x1
+    height = y2 - y1
+    face_search_height = min(
+        height,
+        max(
+            height * FACE_ROI_MIN_HEIGHT_RATIO,
+            width * FACE_ROI_WIDTH_TO_HEIGHT,
+        ),
+    )
+    return x1, y1, x2, y1 + face_search_height
 
 
 def _clip_crop(
@@ -186,9 +215,10 @@ class MediaPipeFaceHandRefiner:
 
     One VIDEO-mode task pair is maintained per anonymous character track so
     MediaPipe sees strictly increasing timestamps even when multiple people are
-    processed in the same source frame. No identity, embedding, blendshape,
-    transformation-matrix, world-landmark, or sensitive-attribute output is
-    requested or exported.
+    processed in the same source frame. FaceLandmarker receives an adaptive
+    upper-body search ROI while HandLandmarker keeps the complete person ROI.
+    No identity, embedding, blendshape, transformation-matrix, world-landmark,
+    or sensitive-attribute output is requested or exported.
     """
 
     def __init__(
@@ -316,21 +346,34 @@ class MediaPipeFaceHandRefiner:
     ) -> FaceHandObservation | None:
         if frame.ndim != 3 or frame.shape[2] != 3:
             raise MediaPipeFaceHandConfigurationError("MediaPipe E3.2 expects BGR uint8 video frames")
-        crop, offset_x, offset_y = _clip_crop(frame, bbox_xyxy, self.config.crop_padding_ratio)
-        rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-        rgb = np.ascontiguousarray(rgb)
-        image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
+
+        face_bbox = _face_search_bbox(bbox_xyxy)
+        face_crop, face_offset_x, face_offset_y = _clip_crop(
+            frame,
+            face_bbox,
+            self.config.crop_padding_ratio,
+        )
+        hand_crop, hand_offset_x, hand_offset_y = _clip_crop(
+            frame,
+            bbox_xyxy,
+            self.config.crop_padding_ratio,
+        )
+        face_rgb = np.ascontiguousarray(cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB))
+        hand_rgb = np.ascontiguousarray(cv2.cvtColor(hand_crop, cv2.COLOR_BGR2RGB))
+        face_image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=face_rgb)
+        hand_image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=hand_rgb)
 
         state = self._states.get(character_id)
         if state is None:
             state = self._new_state()
             self._states[character_id] = state
         timestamp_ms = self._timestamp_ms(frame_idx, state)
-        face_result = state.face_landmarker.detect_for_video(image, timestamp_ms)
-        hand_result = state.hand_landmarker.detect_for_video(image, timestamp_ms)
+        face_result = state.face_landmarker.detect_for_video(face_image, timestamp_ms)
+        hand_result = state.hand_landmarker.detect_for_video(hand_image, timestamp_ms)
 
         frame_height, frame_width = frame.shape[:2]
-        crop_height, crop_width = crop.shape[:2]
+        face_crop_height, face_crop_width = face_crop.shape[:2]
+        hand_crop_height, hand_crop_width = hand_crop.shape[:2]
         face: FaceObservation | None = None
         face_landmarks = list(getattr(face_result, "face_landmarks", []) or [])
         if len(face_landmarks) > 1:
@@ -340,10 +383,10 @@ class MediaPipeFaceHandRefiner:
             points = _pixel_landmarks(
                 landmarks,
                 expected_count=FACE_LANDMARK_COUNT,
-                crop_width=crop_width,
-                crop_height=crop_height,
-                offset_x=offset_x,
-                offset_y=offset_y,
+                crop_width=face_crop_width,
+                crop_height=face_crop_height,
+                offset_x=face_offset_x,
+                offset_y=face_offset_y,
                 frame_width=frame_width,
                 frame_height=frame_height,
             )
@@ -379,10 +422,10 @@ class MediaPipeFaceHandRefiner:
             points = _pixel_landmarks(
                 landmarks,
                 expected_count=HAND_LANDMARK_COUNT,
-                crop_width=crop_width,
-                crop_height=crop_height,
-                offset_x=offset_x,
-                offset_y=offset_y,
+                crop_width=hand_crop_width,
+                crop_height=hand_crop_height,
+                offset_x=hand_offset_x,
+                offset_y=hand_offset_y,
                 frame_width=frame_width,
                 frame_height=frame_height,
             )
