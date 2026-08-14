@@ -1,85 +1,104 @@
-# Video Blueprint Studio — Milestone 1 (Epic E1.1 Real Media Probe)
+# Video Blueprint Studio
 
-Video Blueprint Studio M1 is an offline-first video analysis and verifiable-blueprint system.
-The system converts authorized source videos into structured, reproducible **Video Blueprint bundles** preserving timing, camera motion, anonymous character motion, pose, landmarks, masks, surface residual motion, micro-motion, quality, and provenance.
+Video Blueprint Studio is an offline-first video-analysis and verifiable-blueprint system. It converts an authorized source video into a structured **Video Blueprint bundle** containing source timing, anonymous character evidence, pose/landmarks, masks, motion, camera/body-local transforms, surface residuals, geometry-only micro-motion, environment photometry, quality, provenance, and physically verified sidecars.
 
-> **Status Notice**: The project is currently in **Epic E1.1: Real Media Probe**. Media metadata probing uses system `ffprobe`/`ffmpeg` CLI via subprocess. No heavy CV/AI models or identity replacement models are integrated in E1.1.
+The project does **not** perform identity replacement or video generation, and it must not perform biometric identity recognition or sensitive-attribute inference.
 
----
+## Current status
 
-## 🚀 Epic E1 Runbook
+Implemented and individually certified through **E10**. Current work is **E11 — Integrated Production Acceptance**.
 
-### Prerequisites
-- **Python**: 3.11+
-- **System Dependencies**: `ffmpeg` and `ffprobe` binaries in PATH
-- **Docker** & **Docker Compose** (optional for containerized setup)
+E11 exists because isolated green stage certifications plus a valid Bundle are not sufficient: the production path must also prove that the implemented E4-E9 evidence stages can run together in the **same job** before representative user-video testing.
 
-### 1. Installation & Environment Setup
-Clone the repository and install the project in editable mode with development dependencies:
+See `START_HERE.md`, `GEMINI.md`, and `docs/epic-plan.md` for the current acceptance boundary.
+
+## Production evidence path
+
+```text
+source video
+  -> real media probe / CFR normalization / PTS mapping
+  -> shots + anonymous people
+  -> pose / configured face-hand evidence
+  -> person masks + sparse point motion + dense flow
+  -> 2D camera motion
+  -> body-local frame
+  -> residual surface motion
+  -> geometry-only micro-motion
+  -> environment photometry
+  -> canonical schema validation
+  -> recursive artifact integrity validation
+  -> verified bundle.zip
+```
+
+Higher evidence stages are opt-in and fail closed through configuration gates. A disabled stage is not equivalent to a certified integrated stage.
+
+## Prerequisites
+
+- Python 3.11+
+- `ffmpeg` / `ffprobe`
+- Node.js for the applet runtime
+- Docker / Docker Compose when using the containerized path
+- Approved/pinned CV model dependencies and weights for real higher-stage inference
+
+## Local engineering checks
+
+Install development dependencies:
 
 ```bash
 python3 -m pip install -e .[dev]
 ```
 
-### 2. Local API Server Execution
-Start the FastAPI server locally:
+Run the standard gates:
+
+```bash
+python3 scripts/validate_contracts.py
+python3 -m pytest tests/ -v
+ruff check .
+mypy apps packages
+```
+
+Start the API locally:
 
 ```bash
 uvicorn apps.api.main:app --reload --port 8000
 ```
-API Documentation will be available at `http://localhost:8000/docs`.
 
-### 3. Running Verification & Quality Checks
+API docs are then available at `/docs` on the local server.
 
-#### Contract Validation Script
-Validate positive and negative blueprint JSON fixtures against `contracts/video_blueprint.schema.json`:
+## E11 integrated certification
 
-```bash
-python3 scripts/validate_contracts.py
+The canonical integrated gate is:
+
+```text
+scripts/certify_full_stack_e11.py
+.github/workflows/e11-integrated-acceptance.yml
 ```
 
-#### Integration & Contract Tests
-Run the test suite with pytest:
+It enables sparse point motion, dense flow, camera motion, body-local frame, surface residual motion, micro-motion, and environment photometry together, then requires canonical Blueprint validation, recursive artifact integrity, and post-write ZIP verification from the same job.
 
-```bash
-python3 -m pytest tests/ -v
-```
+The CI workflow provisions the certified detector/pose/mask runtime and deterministic real-human acceptance stimulus.
 
-#### Code Linting (Ruff)
-Run Ruff linter:
+## Validation model
 
-```bash
-ruff check .
-```
+Validation is layered:
 
-#### Type Checking (Mypy)
-Run Mypy static type checker across API and packages:
+- Bundle/security integrity
+- canonical JSON Schema
+- timing/reference/hash integrity
+- module-specific evidence/quality checks
+- fail-closed micro-motion quality gates
+- integrated production acceptance
+- representative real-video acceptance
 
-```bash
-mypy apps packages
-```
+A structurally valid Bundle is necessary but is **not** sufficient proof that a real video's fine details were extracted accurately.
 
-#### One-Step E0 Preflight Verification
-Execute the master E0 preflight script which runs all contract, test, lint, and type checks:
+## Canonical sources
 
-```bash
-bash scripts/e0_preflight.sh
-```
-
----
-
-## 🐳 Docker Setup
-
-Build and run the API service via Docker Compose:
-
-```bash
-docker compose up --build
-```
-
----
-
-## 📜 Canonical Protocols
-
-1. `contracts/video_blueprint.schema.json` — Canonical protocol source (Draft 2020-12 JSON Schema).
-2. `contracts/openapi.yaml` — Canonical REST API specification.
-3. `contracts/example_blueprint.json` — Canonical example fixture.
+1. `contracts/video_blueprint.schema.json`
+2. `contracts/openapi.yaml`
+3. `contracts/example_blueprint.json`
+4. `docs/PRD_M1.md`
+5. `docs/architecture.md`
+6. `docs/epic-plan.md`
+7. `docs/engineering-rules.md`
+8. `docs/validation-rules.md`
