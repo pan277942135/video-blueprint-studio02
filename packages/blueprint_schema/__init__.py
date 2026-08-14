@@ -1,3 +1,4 @@
+from .composite_validator import BlueprintValidator
 from .models import (
     AnalysisJob,
     CreateAnalysisRequest,
@@ -7,7 +8,7 @@ from .models import (
     ValidationReport,
     VideoRecord,
 )
-from .validator import BlueprintValidator, load_canonical_schema
+from .validator import load_canonical_schema
 
 __all__ = [
     "AnalysisJob",
