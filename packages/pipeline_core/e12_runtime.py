@@ -29,13 +29,15 @@ MASK_URL = (
     "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/"
     "rtmdet-ins_tiny_8xb32-300e_coco/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth"
 )
+# The approved E3.2 evidence records these exact public GCS object generations.
+# Pin them instead of resolving `latest`, while retaining SHA256 verification below.
 FACE_TASK_URL = (
     "https://storage.googleapis.com/mediapipe-models/face_landmarker/"
-    "face_landmarker/float16/latest/face_landmarker.task"
+    "face_landmarker/float16/latest/face_landmarker.task?generation=1683136941468629"
 )
 HAND_TASK_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
-    "hand_landmarker/float16/latest/hand_landmarker.task"
+    "hand_landmarker/float16/latest/hand_landmarker.task?generation=1682480005356399"
 )
 
 
