@@ -15,7 +15,7 @@ from packages.pipeline_core.sparse_motion import SparseMotionConfig
 
 
 def _camera_hash(current: str, config: CameraMotionConfig) -> str:
-    return hashlib.sha256(f"{current}|camera-motion:{config.token()}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{current}|camera-motion:{config.token()}".encode()).hexdigest()
 
 
 def run_e5_media_pipeline(
