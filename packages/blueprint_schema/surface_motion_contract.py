@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 ANCHORS = ["left_shoulder", "right_shoulder", "left_hip", "right_hip"]
 
 
