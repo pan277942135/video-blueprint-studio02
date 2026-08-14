@@ -60,8 +60,8 @@ def test_point_ids_do_not_cross_hard_shot_boundary(tmp_path):
     with np.load(emitted[track_uri], allow_pickle=False) as bundle:
         track_ids = bundle["track_id"]
 
-    before = set(int(value) for value in track_ids[4] if value >= 0)
-    after = set(int(value) for value in track_ids[5] if value >= 0)
+    before = {int(value) for value in track_ids[4] if value >= 0}
+    after = {int(value) for value in track_ids[5] if value >= 0}
     assert before
     assert after
     assert before.isdisjoint(after)
