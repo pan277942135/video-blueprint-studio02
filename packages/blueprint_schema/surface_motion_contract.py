@@ -94,6 +94,7 @@ def validate_surface_motion_contract(blueprint: dict[str, Any]) -> list[str]:
     if not isinstance(extensions, dict) or "e7_surface_motion" not in extensions:
         return []
     extension = extensions.get("e7_surface_motion")
+    micro_analyzed_by_e8 = isinstance(extensions.get("e8_micro_motion"), dict)
     path = "extensions.e7_surface_motion"
     if not isinstance(extension, dict):
         return [f"E7 Surface Contract Violation: {path} must be an object."]
@@ -218,5 +219,6 @@ def validate_surface_motion_contract(blueprint: dict[str, Any]) -> list[str]:
             errors.append(f"E7 Surface Contract Violation: {rpath} refs must share one physical NPZ sidecar.")
         if not isinstance(ext_row, dict) or ext_row.get("track_points_ref") != local_ref or ext_row.get("residual_flow_ref") != residual_ref:
             errors.append(f"E7 Surface Cross-Reference Violation: extension row for {character_id!r} must equal region refs.")
-        errors.extend(_check_micro_pending(region.get("micro_motion"), path=f"{rpath}.micro_motion"))
+        if not micro_analyzed_by_e8:
+            errors.extend(_check_micro_pending(region.get("micro_motion"), path=f"{rpath}.micro_motion"))
     return errors
