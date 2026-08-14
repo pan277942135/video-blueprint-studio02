@@ -10,6 +10,7 @@ on:
       - "packages/blueprint_schema/micro_motion_contract.py"
       - "packages/blueprint_schema/surface_motion_contract.py"
       - "packages/blueprint_schema/composite_validator.py"
+      - "scripts/build_e8_cert_stimulus.py"
       - "scripts/certify_micro_motion_e8.py"
       - "scripts/run_pipeline_job.py"
       - "tests/unit/test_e8_micro_motion.py"
@@ -73,38 +74,15 @@ jobs:
           test "$(cut -d' ' -f1 .cert/pose.sha256)" = "77ffc7e802acf10951c353e8bc68b4f05218121177ceaea163aa124436ba6fb7"
           test "$(cut -d' ' -f1 .cert/mask.sha256)" = "ec670f7ee9e20bd7931e15f15b7016f7fe531baaab81f2e6153382d046111885"
 
-      - name: Build real-human video with known local periodic geometry
+      - name: Build real-human video with certified torso-local periodic geometry
         run: |
           curl --fail --location --retry 3 -o .cert/person.jpg https://raw.githubusercontent.com/open-mmlab/mmpose/main/tests/data/coco/000000197388.jpg
-          python - <<'PY'
-          import math, pathlib, cv2, numpy as np
-          image = cv2.imread('.cert/person.jpg')
-          if image is None: raise SystemExit('could not decode official human sample')
-          height, width = image.shape[:2]
-          textured = image.copy()
-          for y in range(12, height, 24):
-              for x in range(12, width, 24):
-                  cv2.circle(textured, (x, y), 1, (180, 180, 180), -1)
-          grid_x, grid_y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
-          cx, cy = width * 0.50, height * 0.52
-          sigma_x, sigma_y = width * 0.17, height * 0.28
-          weight = np.exp(-0.5 * (((grid_x - cx) / sigma_x) ** 2 + ((grid_y - cy) / sigma_y) ** 2)).astype(np.float32)
-          out = pathlib.Path('.cert/frames'); out.mkdir(parents=True, exist_ok=True)
-          fps = 10.0
-          for idx in range(40):
-              t = idx / fps
-              local_shift = 5.0 * math.sin(2.0 * math.pi * 1.0 * t)
-              map_x = grid_x.copy()
-              map_y = grid_y - local_shift * weight
-              locally_warped = cv2.remap(textured, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-              camera = np.asarray([[1.0, 0.0, idx * 0.35], [0.0, 1.0, idx * 0.15]], dtype=np.float32)
-              frame = cv2.warpAffine(locally_warped, camera, (width, height), borderMode=cv2.BORDER_REPLICATE)
-              if not cv2.imwrite(str(out / f'{idx:03d}.png'), frame): raise SystemExit('failed to write frame')
-          pathlib.Path('.cert/stimulus.json').write_text(
-              '{"target_frequency_hz":1.0,"frames":40,"fps":10.0,"local_peak_shift_px":5.0,"global_camera_dx_per_frame":0.35,"global_camera_dy_per_frame":0.15}\n',
-              encoding='utf-8',
-          )
-          PY
+          python scripts/build_e8_cert_stimulus.py \
+            --image .cert/person.jpg \
+            --det-config "$(cat .cert/det_config.txt)" --det-checkpoint .cert/rtmdet_tiny.pth \
+            --pose-config "$(cat .cert/pose_config.txt)" --pose-checkpoint .cert/rtmpose_tiny.pth \
+            --frames-dir .cert/frames --metadata .cert/stimulus.json \
+            --fps 10 --frames 40 --frequency-hz 1.0 --peak-shift-px 6.0
           ffmpeg -hide_banner -loglevel error -framerate 10 -i .cert/frames/%03d.png -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -c:v libx264 -pix_fmt yuv420p -movflags +faststart .cert/micro_motion_smoke.mp4
 
       - name: Run E2-to-E8 end-to-end certification
