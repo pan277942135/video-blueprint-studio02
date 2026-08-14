@@ -22,7 +22,7 @@ from packages.blueprint_schema.validator import BlueprintValidator
 from packages.pipeline_core.bundle_exporter import create_bundle_zip
 from packages.pipeline_core.media_normalizer import MediaNormalizationError
 from packages.pipeline_core.media_probe import MediaProbeError
-from packages.pipeline_core.real_media_pipeline import run_real_media_pipeline
+from packages.pipeline_core.production_media_pipeline import run_production_media_pipeline
 
 app = FastAPI(
     title="Video Blueprint Studio API",
@@ -45,7 +45,7 @@ validator = BlueprintValidator()
 def health_check():
     return {
         "status": "ok",
-        "epic": "E1",
+        "epic": "E10",
         "service": "Video Blueprint Studio API",
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
@@ -129,7 +129,7 @@ def _execute_real_analysis(analysis_id: str):
         return
 
     try:
-        blueprint, sidecars = run_real_media_pipeline(
+        blueprint, sidecars = run_production_media_pipeline(
             job_id=analysis_id,
             video_file_name=video_name,
             video_sha256=video_sha256,
@@ -149,6 +149,7 @@ def _execute_real_analysis(analysis_id: str):
             {"stage": "pose", "status": "failed", "progress": 0.0},
             {"stage": "camera", "status": "failed", "progress": 0.0},
             {"stage": "micro_motion", "status": "failed", "progress": 0.0},
+            {"stage": "environment", "status": "failed", "progress": 0.0},
         ]
         job_store.update_analysis(
             analysis_id,
@@ -184,12 +185,15 @@ def _execute_real_analysis(analysis_id: str):
     create_bundle_zip(blueprint, sidecars, val_report, zip_path)
     job_store.store_bundle_path(analysis_id, zip_path)
 
+    processing_stages = blueprint.get("processing", {}).get("stages", [])
     updated_stages = [
-        {"stage": "shots", "status": "succeeded", "progress": 1.0},
-        {"stage": "people", "status": "succeeded", "progress": 1.0},
-        {"stage": "pose", "status": "succeeded", "progress": 1.0},
-        {"stage": "camera", "status": "succeeded", "progress": 1.0},
-        {"stage": "micro_motion", "status": "succeeded", "progress": 1.0},
+        {
+            "stage": str(stage.get("name")),
+            "status": str(stage.get("status", "succeeded")),
+            "progress": float(stage.get("progress", 1.0)),
+        }
+        for stage in processing_stages
+        if isinstance(stage, dict) and isinstance(stage.get("name"), str)
     ]
 
     job_store.update_analysis(
@@ -244,6 +248,7 @@ def retry_analysis(analysis_id: UUID, req: RetryAnalysisRequest | None = None):
         {"stage": "pose", "status": "pending", "progress": 0.0},
         {"stage": "camera", "status": "pending", "progress": 0.0},
         {"stage": "micro_motion", "status": "pending", "progress": 0.0},
+        {"stage": "environment", "status": "pending", "progress": 0.0},
     ]
 
     updated = job_store.update_analysis(
