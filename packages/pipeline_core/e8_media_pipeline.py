@@ -9,7 +9,8 @@ from packages.pipeline_core.body_local_frame import BodyLocalFrameConfig
 from packages.pipeline_core.camera_motion import CameraMotionConfig
 from packages.pipeline_core.dense_flow import DenseFlowConfig
 from packages.pipeline_core.e7_media_pipeline import run_e7_media_pipeline
-from packages.pipeline_core.micro_motion import MicroMotionConfig, MicroMotionError, run_micro_motion
+from packages.pipeline_core.micro_motion import MicroMotionConfig, MicroMotionError
+from packages.pipeline_core.micro_motion_v2 import run_micro_motion_v2
 from packages.pipeline_core.person_mask import PersonMaskSegmenter
 from packages.pipeline_core.sparse_motion import SparseMotionConfig
 from packages.pipeline_core.surface_motion import SurfaceMotionConfig
@@ -59,7 +60,7 @@ def run_e8_media_pipeline(
     except IndexError as exc:
         raise MicroMotionError("Could not resolve E8 artifact root") from exc
 
-    micro_sidecars, report_ref, extension, quality = run_micro_motion(
+    micro_sidecars, report_ref, extension, quality = run_micro_motion_v2(
         blueprint,
         output_dir=artifact_root,
         sidecars=sidecars,
@@ -78,15 +79,15 @@ def run_e8_media_pipeline(
             "name": "micro_motion",
             "status": "succeeded",
             "progress": 1.0,
-            "message": "E8.1 emitted geometry-only periodic micro-motion evidence",
+            "message": "E8.1 emitted geometry-only per-track-consensus micro-motion evidence",
         }
     )
     blueprint["quality"]["module_scores"]["micro_motion"] = float(quality["score"])
     blueprint["provenance"]["tools"].append(
         {
             "module": "micro_motion",
-            "tool": "E7 sparse body-local residual spectral/coherence analysis",
-            "version": "1",
+            "tool": "E7 sparse body-local per-track frequency consensus and local coherence analysis",
+            "version": "2",
             "code_commit": os.environ.get("GITHUB_SHA"),
             "weights_sha256": None,
             "config_hash": str(processing["config_hash"]),
