@@ -323,7 +323,7 @@ def run_environment_photometry(
     mask_checksum = sha256_file(mask_path)
     background_mask_ref = {
         "uri": mask_uri,
-        "format": "json",
+        "format": "rle_json",
         "dtype": "uint8",
         "shape": [frame_count, height, width],
         "axes": ["frame", "y", "x"],
