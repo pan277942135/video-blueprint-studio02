@@ -233,9 +233,9 @@ def bootstrap_e12_runtime(runtime_dir: pathlib.Path) -> E12RuntimePaths:
 
 __all__ = [
     "DETECTOR_SHA256",
-    "E12RuntimePaths",
     "MASK_SHA256",
     "POSE_SHA256",
+    "E12RuntimePaths",
     "bootstrap_e12_runtime",
     "sha256_file",
 ]
