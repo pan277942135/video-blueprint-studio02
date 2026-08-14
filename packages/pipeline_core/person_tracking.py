@@ -10,6 +10,13 @@ from typing import Any, Protocol
 import cv2
 import numpy as np
 
+from packages.pipeline_core.track_confirmation import (
+    TrackConfirmationError,
+    TrackConfirmationPolicy,
+    evaluate_track_scores,
+    validate_track_confirmation_policy,
+)
+
 
 class PersonTrackingError(RuntimeError):
     """Raised when anonymous person tracking cannot produce trustworthy output."""
@@ -151,6 +158,55 @@ def associate_anonymous_tracks(
                 tracks.append(track)
 
     return tracks
+
+
+def confirm_anonymous_tracks(
+    tracks: list[AnonymousTrack],
+    *,
+    policy: TrackConfirmationPolicy | None = None,
+) -> tuple[list[AnonymousTrack], list[dict[str, Any]]]:
+    """Confirm aggregate person evidence and reindex only canonical accepted tracks.
+
+    Candidate IDs are preserved in diagnostics. Confirmed tracks receive contiguous
+    anonymous IDs so rejected weak candidates do not leak gaps into the Blueprint.
+    """
+    cfg = policy or TrackConfirmationPolicy()
+    try:
+        validate_track_confirmation_policy(cfg)
+    except TrackConfirmationError as exc:
+        raise PersonTrackingError(f"Invalid track confirmation policy: {exc}") from exc
+
+    confirmed_tracks: list[AnonymousTrack] = []
+    evidence_rows: list[dict[str, Any]] = []
+    for track in tracks:
+        try:
+            evidence = evaluate_track_scores(
+                track.character_id,
+                [detection.score for detection in track.detections.values()],
+                policy=cfg,
+            )
+        except TrackConfirmationError as exc:
+            raise PersonTrackingError(
+                f"Invalid confirmation evidence for {track.character_id}: {exc}"
+            ) from exc
+
+        row: dict[str, Any] = evidence.to_dict()
+        if evidence.confirmed:
+            next_index = len(confirmed_tracks)
+            confirmed_character_id = f"char_{next_index:03d}"
+            confirmed_track = AnonymousTrack(
+                character_id=confirmed_character_id,
+                track_label=f"anonymous_track_{next_index:03d}",
+                shot_id=track.shot_id,
+                detections=dict(track.detections),
+            )
+            confirmed_tracks.append(confirmed_track)
+            row["confirmed_character_id"] = confirmed_character_id
+        else:
+            row["confirmed_character_id"] = None
+        evidence_rows.append(row)
+
+    return confirmed_tracks, evidence_rows
 
 
 def _sha256_file(path: str) -> str:
@@ -477,10 +533,16 @@ def run_person_tracking(
     detector: PersonDetector,
     output_dir: str,
     config: PersonTrackingConfig | None = None,
+    confirmation_policy: TrackConfirmationPolicy | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
-    """Run frame-level person detection, anonymous association, and sidecar export."""
+    """Run candidate detection, anonymous association, track confirmation, and export."""
     cfg = config or PersonTrackingConfig()
+    confirmation_cfg = confirmation_policy or TrackConfirmationPolicy()
     _validate_tracking_config(cfg)
+    try:
+        validate_track_confirmation_policy(confirmation_cfg)
+    except TrackConfirmationError as exc:
+        raise PersonTrackingError(f"Invalid track confirmation policy: {exc}") from exc
     if not os.path.isfile(video_path):
         raise PersonTrackingError(f"Normalized video does not exist: {video_path}")
 
@@ -505,7 +567,11 @@ def run_person_tracking(
             f"Person detector decoded {decoded_frames} frames; normalized timeline requires {frame_count}"
         )
 
-    tracks = associate_anonymous_tracks(shots, detections_by_frame, config=cfg)
+    candidate_tracks = associate_anonymous_tracks(shots, detections_by_frame, config=cfg)
+    tracks, confirmation_evidence = confirm_anonymous_tracks(
+        candidate_tracks,
+        policy=confirmation_cfg,
+    )
     characters: list[dict[str, Any]] = []
     sidecars: dict[str, Any] = {}
     overlays: list[dict[str, Any]] = []
@@ -553,7 +619,11 @@ def run_person_tracking(
         "iou_threshold": cfg.iou_threshold,
         "max_gap_frames": cfg.max_gap_frames,
         "frame_count": frame_count,
+        "candidate_track_count": len(candidate_tracks),
         "track_count": len(tracks),
+        "rejected_track_count": len(candidate_tracks) - len(tracks),
+        "track_confirmation_policy": confirmation_cfg.to_dict(),
+        "track_confirmation": confirmation_evidence,
         "identity_inference_performed": False,
         "biometric_embedding_exported": False,
         "tracks": [
