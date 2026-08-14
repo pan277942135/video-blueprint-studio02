@@ -66,7 +66,8 @@ def run_e8_media_pipeline(
         config=micro_motion_config,
     )
     sidecars.update(micro_sidecars)
-    blueprint["artifacts"]["reports"].append(report_ref)
+    canonical_report_ref = {key: report_ref[key] for key in ("kind", "uri", "sha256")}
+    blueprint["artifacts"]["reports"].append(canonical_report_ref)
     blueprint["extensions"]["e8_micro_motion"] = extension
 
     processing = blueprint["processing"]
