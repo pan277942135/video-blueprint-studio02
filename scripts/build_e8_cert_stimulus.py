@@ -18,11 +18,17 @@ from packages.pipeline_core.rtmdet_backend import RTMDetBackendConfig, RTMDetPer
 from packages.pipeline_core.rtmpose_backend import RTMPoseBackendConfig, RTMPosePoseEstimator
 
 POSE_SHA256 = "77ffc7e802acf10951c353e8bc68b4f05218121177ceaea163aa124436ba6fb7"
-ANCHOR_INDICES = (5, 6, 11, 12)
+BODY_FRAME_ANCHORS = (5, 6, 11, 12)
+DISTAL_SEGMENTS = (
+    ("left_forearm", 7, 9),
+    ("right_forearm", 8, 10),
+    ("left_lower_leg", 13, 15),
+    ("right_lower_leg", 14, 16),
+)
 
 
 def _args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build deterministic E8 torso-local periodic geometry stimulus")
+    parser = argparse.ArgumentParser(description="Build deterministic E8 distal-limb periodic geometry stimulus")
     parser.add_argument("--image", required=True)
     parser.add_argument("--det-config", required=True)
     parser.add_argument("--det-checkpoint", required=True)
@@ -37,36 +43,67 @@ def _args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _score_candidate(
+def _score_person(
     bbox: tuple[float, float, float, float],
     confidence: np.ndarray,
 ) -> float:
     x1, y1, x2, y2 = bbox
     area = max(0.0, (x2 - x1) * (y2 - y1))
-    anchor_confidence = float(np.min(confidence[list(ANCHOR_INDICES)]))
+    anchor_confidence = float(np.min(confidence[list(BODY_FRAME_ANCHORS)]))
     return math.sqrt(area) * max(0.0, anchor_confidence)
+
+
+def _choose_distal_segment(
+    keypoints: np.ndarray,
+    confidence: np.ndarray,
+) -> tuple[str, int, int, np.ndarray, np.ndarray, float, float]:
+    body_anchors = keypoints[list(BODY_FRAME_ANCHORS)]
+    candidates: list[tuple[float, str, int, int, np.ndarray, np.ndarray, float, float]] = []
+    for name, start_index, end_index in DISTAL_SEGMENTS:
+        endpoint_confidence = float(min(confidence[start_index], confidence[end_index]))
+        if not math.isfinite(endpoint_confidence) or endpoint_confidence < 0.45:
+            continue
+        start = keypoints[start_index].astype(np.float64)
+        end = keypoints[end_index].astype(np.float64)
+        if not np.all(np.isfinite(start)) or not np.all(np.isfinite(end)):
+            continue
+        length = float(np.linalg.norm(end - start))
+        if length < 24.0:
+            continue
+        center = 0.5 * (start + end)
+        anchor_distance = float(np.min(np.linalg.norm(body_anchors - center[None, :], axis=1)))
+        score = length * endpoint_confidence * (1.0 + anchor_distance / max(length, 1.0))
+        candidates.append((score, name, start_index, end_index, start, end, endpoint_confidence, anchor_distance))
+    if not candidates:
+        raise SystemExit("selected person has no reliable distal limb segment for E8 certification")
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    _, name, start_index, end_index, start, end, endpoint_confidence, anchor_distance = candidates[0]
+    return name, start_index, end_index, start, end, endpoint_confidence, anchor_distance
 
 
 def _draw_tracking_texture(
     image: np.ndarray,
     center: np.ndarray,
-    sigma_x: float,
-    sigma_y: float,
+    tangent: np.ndarray,
+    normal: np.ndarray,
+    sigma_along: float,
+    sigma_across: float,
 ) -> tuple[np.ndarray, int]:
     textured = image.copy()
     height, width = image.shape[:2]
-    step_x = max(5, round(sigma_x * 0.30))
-    step_y = max(5, round(sigma_y * 0.30))
-    x_min = max(2, math.floor(float(center[0] - 1.6 * sigma_x)))
-    x_max = min(width - 3, math.ceil(float(center[0] + 1.6 * sigma_x)))
-    y_min = max(2, math.floor(float(center[1] - 1.6 * sigma_y)))
-    y_max = min(height - 3, math.ceil(float(center[1] + 1.6 * sigma_y)))
+    radius = 1.8 * max(sigma_along, sigma_across)
+    step = max(4, round(min(sigma_along, sigma_across) * 0.45))
+    x_min = max(2, math.floor(float(center[0] - radius)))
+    x_max = min(width - 3, math.ceil(float(center[0] + radius)))
+    y_min = max(2, math.floor(float(center[1] - radius)))
+    y_max = min(height - 3, math.ceil(float(center[1] + radius)))
     dot_count = 0
-    for y in range(y_min, y_max + 1, step_y):
-        for x in range(x_min, x_max + 1, step_x):
-            dx = (x - float(center[0])) / max(sigma_x, 1e-6)
-            dy = (y - float(center[1])) / max(sigma_y, 1e-6)
-            if dx * dx + dy * dy > 1.8:
+    for y in range(y_min, y_max + 1, step):
+        for x in range(x_min, x_max + 1, step):
+            offset = np.asarray([x - float(center[0]), y - float(center[1])], dtype=np.float64)
+            along = float(np.dot(offset, tangent)) / max(sigma_along, 1e-6)
+            across = float(np.dot(offset, normal)) / max(sigma_across, 1e-6)
+            if along * along + across * across > 1.8:
                 continue
             local = textured[max(0, y - 1) : y + 2, max(0, x - 1) : x + 2]
             mean_value = float(np.mean(local)) if local.size else 128.0
@@ -87,7 +124,7 @@ def main() -> int:
 
     # MMEngine's default scope is process-global. Finish RTMDet inference before
     # RTMPose is initialized so the pose backend cannot switch the active scope
-    # to mmpose while mmdet is still building its inference transform pipeline.
+    # while mmdet is still building its inference transform pipeline.
     detector = RTMDetPersonDetector(
         RTMDetBackendConfig(
             config_path=str(pathlib.Path(args.det_config).resolve()),
@@ -112,57 +149,66 @@ def main() -> int:
         ),
         weights_approved=True,
     )
-    candidates: list[tuple[float, Any, Any]] = []
+    people: list[tuple[float, Any, Any]] = []
     for detection in detections:
         pose = pose_estimator.estimate(image, detection.bbox_xyxy, 0, "cert_candidate")
         if pose is None:
             continue
-        anchor_confidence = pose.confidence[list(ANCHOR_INDICES)]
+        anchor_confidence = pose.confidence[list(BODY_FRAME_ANCHORS)]
         if not np.all(np.isfinite(anchor_confidence)) or float(np.min(anchor_confidence)) < 0.45:
             continue
-        candidates.append((_score_candidate(detection.bbox_xyxy, pose.confidence), detection, pose))
-    if not candidates:
-        raise SystemExit("no detected person has sufficiently reliable shoulder/hip anchors")
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    _, detection, pose = candidates[0]
+        try:
+            _choose_distal_segment(pose.keypoints_xy.astype(np.float64), pose.confidence)
+        except SystemExit:
+            continue
+        people.append((_score_person(detection.bbox_xyxy, pose.confidence), detection, pose))
+    if not people:
+        raise SystemExit("no detected person has reliable body-frame anchors and a distal limb segment")
+    people.sort(key=lambda item: item[0], reverse=True)
+    _, detection, pose = people[0]
 
     keypoints = pose.keypoints_xy.astype(np.float64)
-    left_shoulder, right_shoulder, left_hip, right_hip = (keypoints[index] for index in ANCHOR_INDICES)
-    shoulder_mid = 0.5 * (left_shoulder + right_shoulder)
-    hip_mid = 0.5 * (left_hip + right_hip)
-    torso_vector = hip_mid - shoulder_mid
-    torso_length = float(np.linalg.norm(torso_vector))
-    shoulder_width = float(np.linalg.norm(left_shoulder - right_shoulder))
-    hip_width = float(np.linalg.norm(left_hip - right_hip))
-    body_width = max(shoulder_width, hip_width)
-    if torso_length < 20.0 or body_width < 16.0:
-        raise SystemExit("selected person torso is too small for deterministic E8 certification")
-
-    # Keep the stimulus well inside the four body-frame anchors. The Gaussian
-    # center sits slightly above the torso midpoint and its 2-sigma extent does
-    # not reach the shoulder/hip anchor rows on a normal upright subject.
-    center = shoulder_mid + 0.47 * torso_vector
-    sigma_x = max(5.0, body_width * 0.16)
-    sigma_y = max(6.0, torso_length * 0.11)
-    textured, dot_count = _draw_tracking_texture(image, center, sigma_x, sigma_y)
+    segment_name, start_index, end_index, start, end, segment_confidence, anchor_distance = _choose_distal_segment(
+        keypoints,
+        pose.confidence,
+    )
+    segment_vector = end - start
+    segment_length = float(np.linalg.norm(segment_vector))
+    tangent = segment_vector / segment_length
+    normal = np.asarray([-tangent[1], tangent[0]], dtype=np.float64)
+    center = 0.5 * (start + end)
+    sigma_along = max(7.0, segment_length * 0.18)
+    sigma_across = max(4.5, segment_length * 0.10)
+    textured, dot_count = _draw_tracking_texture(
+        image,
+        center,
+        tangent,
+        normal,
+        sigma_along,
+        sigma_across,
+    )
     if dot_count < 8:
-        raise SystemExit("E8 torso certification patch produced too few trackable texture points")
+        raise SystemExit("E8 distal-limb certification patch produced too few trackable texture points")
 
     height, width = image.shape[:2]
     grid_x, grid_y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
-    dx = (grid_x - float(center[0])) / sigma_x
-    dy = (grid_y - float(center[1])) / sigma_y
-    weight = np.exp(-0.5 * (dx * dx + dy * dy)).astype(np.float32)
+    offset_x = grid_x - float(center[0])
+    offset_y = grid_y - float(center[1])
+    along = (offset_x * float(tangent[0]) + offset_y * float(tangent[1])) / sigma_along
+    across = (offset_x * float(normal[0]) + offset_y * float(normal[1])) / sigma_across
+    weight = np.exp(-0.5 * (along * along + across * across)).astype(np.float32)
 
-    # Explicitly suppress warp near the four RTMPose anchors so E6 body-frame
-    # estimation does not absorb the injected local surface motion.
-    anchor_guard = np.ones_like(weight, dtype=np.float32)
-    guard_radius = max(5.0, 0.10 * torso_length)
-    for anchor in (left_shoulder, right_shoulder, left_hip, right_hip):
-        distance2 = (grid_x - float(anchor[0])) ** 2 + (grid_y - float(anchor[1])) ** 2
+    # Keep the segment endpoints and the four E6 shoulder/hip body-frame anchors
+    # physically stationary. The periodic warp therefore represents local surface
+    # geometry rather than a body-frame change that E6 is expected to absorb.
+    guard_points = [start, end, *(keypoints[index] for index in BODY_FRAME_ANCHORS)]
+    guard_radius = max(5.0, 0.12 * segment_length)
+    guard = np.ones_like(weight, dtype=np.float32)
+    for point in guard_points:
+        distance2 = (grid_x - float(point[0])) ** 2 + (grid_y - float(point[1])) ** 2
         local_guard = 1.0 - np.exp(-0.5 * distance2 / (guard_radius * guard_radius)).astype(np.float32)
-        anchor_guard *= local_guard
-    weight *= anchor_guard
+        guard *= local_guard
+    weight *= guard
 
     frames_dir = pathlib.Path(args.frames_dir).resolve()
     frames_dir.mkdir(parents=True, exist_ok=True)
@@ -171,8 +217,8 @@ def main() -> int:
     for frame_idx in range(args.frames):
         t = frame_idx / args.fps
         local_shift = args.peak_shift_px * math.sin(2.0 * math.pi * args.frequency_hz * t)
-        map_x = grid_x
-        map_y = grid_y - local_shift * weight
+        map_x = grid_x - local_shift * float(normal[0]) * weight
+        map_y = grid_y - local_shift * float(normal[1]) * weight
         locally_warped = cv2.remap(
             textured,
             map_x,
@@ -202,14 +248,20 @@ def main() -> int:
         "global_camera_dy_per_frame": 0.15,
         "selected_person_bbox_xyxy": [round(float(value), 4) for value in detection.bbox_xyxy],
         "selected_person_score": round(float(detection.score), 6),
-        "anchor_confidence": [round(float(pose.confidence[index]), 6) for index in ANCHOR_INDICES],
-        "shoulder_mid_xy": [round(float(value), 4) for value in shoulder_mid],
-        "hip_mid_xy": [round(float(value), 4) for value in hip_mid],
+        "body_frame_anchor_confidence": [round(float(pose.confidence[index]), 6) for index in BODY_FRAME_ANCHORS],
+        "selected_segment": segment_name,
+        "selected_segment_indices": [start_index, end_index],
+        "selected_segment_confidence": round(segment_confidence, 6),
+        "selected_segment_length_px": round(segment_length, 4),
+        "distance_to_nearest_body_frame_anchor_px": round(anchor_distance, 4),
+        "segment_start_xy": [round(float(value), 4) for value in start],
+        "segment_end_xy": [round(float(value), 4) for value in end],
         "stimulus_center_xy": [round(float(value), 4) for value in center],
-        "stimulus_sigma_xy": [round(sigma_x, 4), round(sigma_y, 4)],
-        "anchor_guard_radius_px": round(guard_radius, 4),
+        "stimulus_sigma_along_across": [round(sigma_along, 4), round(sigma_across, 4)],
+        "stimulus_normal_xy": [round(float(value), 6) for value in normal],
+        "guard_radius_px": round(guard_radius, 4),
         "tracking_texture_dots": dot_count,
-        "stimulus_semantics": "non-physiological torso-local periodic geometry",
+        "stimulus_semantics": "non-physiological distal-limb-local periodic geometry",
     }
     metadata_path = pathlib.Path(args.metadata).resolve()
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
