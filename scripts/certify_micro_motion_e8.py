@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import pathlib
 import sys
@@ -66,6 +67,133 @@ def _write_result(output: pathlib.Path, result: dict) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))
+
+
+def _longest_valid_run(valid: np.ndarray) -> np.ndarray:
+    best = np.asarray([], dtype=np.int64)
+    start: int | None = None
+    for idx, is_valid in enumerate(np.asarray(valid, dtype=bool)):
+        if is_valid:
+            if start is None:
+                start = idx
+        elif start is not None:
+            candidate = np.arange(start, idx, dtype=np.int64)
+            if len(candidate) > len(best):
+                best = candidate
+            start = None
+    if start is not None:
+        candidate = np.arange(start, len(valid), dtype=np.int64)
+        if len(candidate) > len(best):
+            best = candidate
+    return best
+
+
+def _spectral_diagnostic(values: np.ndarray, valid: np.ndarray, *, fps: float) -> dict[str, float | int | None]:
+    indices = _longest_valid_run(valid)
+    if len(indices) < 12:
+        return {
+            "window_frames": len(indices),
+            "dominant_frequency_hz": None,
+            "periodicity_score": 0.0,
+            "target_1hz_power_fraction": 0.0,
+        }
+    signal = np.asarray(values[indices], dtype=np.float64)
+    signal = signal[np.isfinite(signal)]
+    if len(signal) < 12:
+        return {
+            "window_frames": len(signal),
+            "dominant_frequency_hz": None,
+            "periodicity_score": 0.0,
+            "target_1hz_power_fraction": 0.0,
+        }
+    signal -= float(np.mean(signal))
+    if float(np.sqrt(np.mean(signal * signal))) < 1e-12:
+        return {
+            "window_frames": len(signal),
+            "dominant_frequency_hz": None,
+            "periodicity_score": 0.0,
+            "target_1hz_power_fraction": 0.0,
+        }
+    spectrum = np.fft.rfft(signal * np.hanning(len(signal)))
+    frequencies = np.fft.rfftfreq(len(signal), d=1.0 / fps)
+    power = np.abs(spectrum) ** 2
+    band = (frequencies >= 0.2) & (frequencies <= min(3.0, fps * 0.45)) & (frequencies > 0.0)
+    band_indices = np.flatnonzero(band)
+    if not len(band_indices):
+        return {
+            "window_frames": len(signal),
+            "dominant_frequency_hz": None,
+            "periodicity_score": 0.0,
+            "target_1hz_power_fraction": 0.0,
+        }
+    band_power = float(np.sum(power[band_indices]))
+    if not math.isfinite(band_power) or band_power <= 1e-18:
+        return {
+            "window_frames": len(signal),
+            "dominant_frequency_hz": None,
+            "periodicity_score": 0.0,
+            "target_1hz_power_fraction": 0.0,
+        }
+    peak_index = int(band_indices[int(np.argmax(power[band_indices]))])
+    target_index = int(band_indices[int(np.argmin(np.abs(frequencies[band_indices] - TARGET_FREQUENCY_HZ)))])
+    return {
+        "window_frames": len(signal),
+        "dominant_frequency_hz": round(float(frequencies[peak_index]), 6),
+        "periodicity_score": round(float(power[peak_index] / band_power), 6),
+        "target_1hz_power_fraction": round(float(power[target_index] / band_power), 6),
+    }
+
+
+def _signed_corr(left: np.ndarray, right: np.ndarray) -> float | None:
+    valid = np.isfinite(left) & np.isfinite(right)
+    if int(np.count_nonzero(valid)) < 4:
+        return None
+    x = np.asarray(left[valid], dtype=np.float64)
+    y = np.asarray(right[valid], dtype=np.float64)
+    if float(np.std(x)) < 1e-12 or float(np.std(y)) < 1e-12:
+        return 0.0
+    value = float(np.corrcoef(x, y)[0, 1])
+    return round(value, 6) if math.isfinite(value) else None
+
+
+def _pose_component_diagnostics(character: dict, sidecars: dict, velocity: np.ndarray) -> dict[str, float | None]:
+    body_ref = character.get("surface_motion", {}).get("body_frame_transform_ref")
+    if not isinstance(body_ref, dict):
+        return {}
+    arrays = _load(
+        body_ref,
+        sidecars,
+        ("source_pixel_to_body_local", "body_origin_stabilized_xy", "torso_scale_px", "valid_frame"),
+    )
+    transforms = arrays["source_pixel_to_body_local"].astype(np.float64, copy=False)
+    origins = arrays["body_origin_stabilized_xy"].astype(np.float64, copy=False)
+    scales = arrays["torso_scale_px"].astype(np.float64, copy=False)
+    body_valid = arrays["valid_frame"].astype(bool, copy=False)
+    frame_count = len(velocity)
+    origin_dx = np.full(frame_count, np.nan, dtype=np.float64)
+    origin_dy = np.full(frame_count, np.nan, dtype=np.float64)
+    log_scale = np.full(frame_count, np.nan, dtype=np.float64)
+    angle_delta = np.full(frame_count, np.nan, dtype=np.float64)
+    for frame_idx in range(1, frame_count):
+        if not body_valid[frame_idx - 1] or not body_valid[frame_idx]:
+            continue
+        previous_scale = float(scales[frame_idx - 1])
+        current_scale = float(scales[frame_idx])
+        if previous_scale <= 1e-12 or current_scale <= 1e-12:
+            continue
+        mean_scale = 0.5 * (previous_scale + current_scale)
+        origin_dx[frame_idx] = float(origins[frame_idx, 0] - origins[frame_idx - 1, 0]) / mean_scale
+        origin_dy[frame_idx] = float(origins[frame_idx, 1] - origins[frame_idx - 1, 1]) / mean_scale
+        log_scale[frame_idx] = math.log(current_scale / previous_scale)
+        previous_angle = math.atan2(float(transforms[frame_idx - 1, 0, 1]), float(transforms[frame_idx - 1, 0, 0]))
+        current_angle = math.atan2(float(transforms[frame_idx, 0, 1]), float(transforms[frame_idx, 0, 0]))
+        angle_delta[frame_idx] = (current_angle - previous_angle + math.pi) % (2.0 * math.pi) - math.pi
+    return {
+        "velocity_vs_origin_dx_corr": _signed_corr(velocity, origin_dx),
+        "velocity_vs_origin_dy_corr": _signed_corr(velocity, origin_dy),
+        "velocity_vs_log_scale_corr": _signed_corr(velocity, log_scale),
+        "velocity_vs_angle_delta_corr": _signed_corr(velocity, angle_delta),
+    }
 
 
 def main() -> int:
@@ -177,6 +305,8 @@ def main() -> int:
                 raise SystemExit("E8.1 unexpectedly emitted radial/area deformation modes")
             signal_ref = micro.get("signal_ref")
             acceleration_ref = micro.get("acceleration_ref")
+            spectral_velocity: dict[str, float | int | None] = {}
+            pose_components: dict[str, float | None] = {}
             if isinstance(signal_ref, dict):
                 arrays = _load(
                     signal_ref,
@@ -203,6 +333,12 @@ def main() -> int:
                 acceleration_valid_rows += 1
                 if not isinstance(acceleration_ref, dict) or acceleration_ref.get("metadata", {}).get("valid_array_key") != "acceleration_valid":
                     raise SystemExit("E8 acceleration ref does not own its validity mask")
+                spectral_velocity = _spectral_diagnostic(
+                    arrays["velocity"],
+                    arrays["velocity_valid"].astype(bool),
+                    fps=float(blueprint["timebase"]["fps_num"]) / float(blueprint["timebase"]["fps_den"]),
+                )
+                pose_components = _pose_component_diagnostics(character, sidecars, arrays["velocity"])
 
             row = {
                 "character_id": character.get("character_id"),
@@ -217,6 +353,8 @@ def main() -> int:
                 "observation_dropout_ratio": micro.get("occlusion_ratio"),
                 "confidence": micro.get("confidence"),
                 "usable_for_generation": micro.get("usable_for_generation"),
+                "velocity_spectrum_diagnostic": spectral_velocity,
+                "pose_component_diagnostics": pose_components,
                 "limitations": limitations,
             }
             region_rows.append(row)
