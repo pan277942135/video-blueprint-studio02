@@ -94,13 +94,13 @@ def _reseed(
     free = np.flatnonzero(tids < 0)
     if free.size == 0:
         return next_id
-    seed_mask = mask.copy()
+    seed_mask_u8 = mask.astype(np.uint8) * 255
     exclusion_radius = max(1, round(config.min_distance_px))
     for slot in np.flatnonzero(tids >= 0):
         x, y = xy[slot]
         if np.isfinite(x) and np.isfinite(y):
-            cv2.circle(seed_mask, (round(float(x)), round(float(y))), exclusion_radius, False, -1)
-    seeds = seed_features(gray, seed_mask, int(free.size), config)
+            cv2.circle(seed_mask_u8, (round(float(x)), round(float(y))), exclusion_radius, 0, -1)
+    seeds = seed_features(gray, seed_mask_u8.astype(np.bool_), int(free.size), config)
     for slot, point in zip(free, seeds, strict=False):
         xy[slot] = point
         tids[slot] = next_id
