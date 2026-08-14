@@ -74,6 +74,7 @@ def run_e9_media_pipeline(
         config=environment_config,
     )
     sidecars.update(environment_sidecars)
+    environment["quality"] = quality
     blueprint["environment"] = environment
     blueprint["artifacts"]["reports"].append(report_ref)
     blueprint["extensions"]["e9_environment"] = extension
