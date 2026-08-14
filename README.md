@@ -78,7 +78,17 @@ It enables sparse point motion, dense flow, camera motion, body-local frame, sur
 
 ## E12 real-video acceptance
 
-The preferred representative-video path is now one command once the approved CV Python dependencies are installed:
+The repository contains the same pinned CPU Python runtime bootstrap used by the E12 certification workflow. On Ubuntu/Debian, install the system libraries and certified Python stack with:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg libegl1 libgles2 libgl1
+bash scripts/install_e12_python_runtime.sh
+```
+
+The installer deliberately keeps NumPy 1.26.4 and one OpenCV contrib distribution so the certified Torch/MMCV ABI and MediaPipe runtime can coexist. It finishes by importing the composed stack and asserting the approved package versions; a mismatch fails immediately instead of falling through to video inference.
+
+Then the preferred representative-video path is one command:
 
 ```bash
 python scripts/run_real_video_e12.py \
@@ -86,7 +96,7 @@ python scripts/run_real_video_e12.py \
   --output-dir .e12
 ```
 
-The runner automatically resolves the installed RTMDet / RTMPose / RTMDet-Ins configs, downloads any missing approved model/task assets into `.e12/runtime`, verifies every asset against its approved SHA256, refuses to overwrite a mismatched existing asset, enables E3.2 plus E4-E9 together, writes and physically verifies `bundle.zip`, and emits the E12 diagnostics. If execution aborts, it preserves `e12_failure_report.json` plus an updated `e12_run_manifest.json` containing the failed phase and traceback.
+The runner automatically resolves the installed RTMDet / RTMPose / RTMDet-Ins configs, downloads any missing approved model/task assets into `.e12/runtime`, verifies every asset against its approved SHA256, refuses to overwrite a mismatched existing asset, enables E3.2 plus E4-E9 together, writes and physically verifies `bundle.zip`, and emits the E12 diagnostics. Approved MediaPipe task downloads are additionally pinned to the object generations recorded by the E3.2 model approval, rather than trusting a moving `latest` object alone. If execution aborts, it preserves `e12_failure_report.json` plus an updated `e12_run_manifest.json` containing the failed phase and traceback.
 
 For controlled/offline environments, all eight runtime paths may still be supplied explicitly. Partial explicit runtime configuration is rejected so the run cannot silently mix controlled and auto-bootstrapped assets.
 
