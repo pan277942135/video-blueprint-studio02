@@ -62,7 +62,7 @@ jobs:
           set -euo pipefail
           curl --fail --location --retry 3 -o .cert/rtmdet_tiny.pth https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_tiny_8xb32-300e_coco/rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth
           curl --fail --location --retry 3 -o .cert/rtmpose_tiny.pth https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmpose-tiny_simcc-coco_pt-aic-coco_420e-256x192-e613ba3f_20230127.pth
-          curl --fail --location --retry 3 -o .cert/rtmdet_ins_tiny.pth https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_tiny_8xb32-300e_coco/../rtmdet-ins_tiny_8xb32-300e_coco/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth
+          curl --fail --location --retry 3 -o .cert/rtmdet_ins_tiny.pth https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth
           sha256sum .cert/rtmdet_tiny.pth | tee .cert/detector.sha256
           sha256sum .cert/rtmpose_tiny.pth | tee .cert/pose.sha256
           sha256sum .cert/rtmdet_ins_tiny.pth | tee .cert/mask.sha256
