@@ -48,10 +48,6 @@ class EnvironmentPhotometryConfig:
         return value
 
 
-def _json_sha256(value: Any) -> str:
-    return hashlib.sha256(json.dumps(value, indent=2, sort_keys=True).encode()).hexdigest()
-
-
 def _atomic_json(path: str, payload: dict[str, Any]) -> None:
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
@@ -444,7 +440,10 @@ def run_environment_photometry(
         "biometric_embedding_exported": False,
         "new_model_weights_introduced": False,
     }
-    report_ref = {"kind": "environment_photometry", "uri": report_uri, "sha256": _json_sha256(report)}
+    report_path = os.path.join(output_dir, report_uri.replace("/", os.sep))
+    Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+    _atomic_json(report_path, report)
+    report_ref = {"kind": "environment_photometry", "uri": report_uri, "sha256": sha256_file(report_path)}
     extension = {
         "enabled": True,
         "algorithm": "background_photometry_v1",
@@ -482,7 +481,7 @@ def run_environment_photometry(
         "blur_ref": blur_ref,
         "occluder_tracks": [],
     }
-    emitted = {mask_uri: mask_path, metrics_uri: metrics_path, report_uri: report}
+    emitted = {mask_uri: mask_path, metrics_uri: metrics_path, report_uri: report_path}
     return environment, emitted, report_ref, extension, quality
 
 
