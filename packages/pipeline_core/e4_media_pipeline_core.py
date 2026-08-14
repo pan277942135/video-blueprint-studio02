@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+import cv2
+
 from packages.pipeline_core.person_mask import (
     PersonMaskError,
     PersonMaskSegmenter,
@@ -34,12 +36,7 @@ def run_e4_media_pipeline(
     person_mask_segmenter: PersonMaskSegmenter | None = None,
     point_track_config: SparseMotionConfig | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run E4.1 person masks and optional E4.2 anonymous sparse motion evidence.
-
-    Both stages are fail-closed. E4.2 is image-space feature motion only: point
-    IDs are scoped to one anonymous character in one video and are reset at
-    shot boundaries; no identity or biometric inference is performed.
-    """
+    """Run E4.1 masks and optional E4.2 image-space sparse motion."""
     blueprint, sidecars = run_real_media_pipeline(
         job_id=job_id,
         video_file_name=video_file_name,
@@ -136,7 +133,7 @@ def run_e4_media_pipeline(
                 "name": "point_tracks",
                 "status": "succeeded",
                 "progress": 1.0,
-                "message": "E4.2 emitted mask-constrained anonymous sparse motion evidence",
+                "message": "E4.2 emitted mask-constrained sparse motion evidence",
             }
         )
         blueprint["quality"]["module_scores"]["point_tracks"] = float(motion_quality["score"])
@@ -144,7 +141,7 @@ def run_e4_media_pipeline(
             {
                 "module": "point_tracks",
                 "tool": "OpenCV Shi-Tomasi + pyramidal Lucas-Kanade",
-                "version": cv2.__version__ if "cv2" in globals() else "opencv",
+                "version": cv2.__version__,
                 "code_commit": os.environ.get("GITHUB_SHA"),
                 "weights_sha256": None,
                 "config_hash": str(processing["config_hash"]),

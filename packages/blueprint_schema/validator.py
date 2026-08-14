@@ -29,9 +29,7 @@ def _validate_face_2d_ref(
 
     errors: list[str] = []
     if ref.get("coordinate_space") != "pixel_xy":
-        errors.append(
-            f"E3.2 Face Contract Violation: {path}.coordinate_space must be 'pixel_xy'."
-        )
+        errors.append(f"E3.2 Face Contract Violation: {path}.coordinate_space must be 'pixel_xy'.")
     if ref.get("unit") != "px":
         errors.append(f"E3.2 Face Contract Violation: {path}.unit must be 'px'.")
     if ref.get("axes") != ["frame", "face_landmark", "xy"]:
@@ -63,9 +61,7 @@ def _validate_face_2d_ref(
     if ref.get("nan_policy", "preserve") != "preserve":
         errors.append(f"E3.2 Face Contract Violation: {path}.nan_policy must be 'preserve'.")
     if ref.get("interpolation_policy", "none") != "none":
-        errors.append(
-            f"E3.2 Face Contract Violation: {path}.interpolation_policy must be 'none'."
-        )
+        errors.append(f"E3.2 Face Contract Violation: {path}.interpolation_policy must be 'none'.")
     return errors
 
 
@@ -95,29 +91,21 @@ def _validate_person_mask_ref(
     }
     for key, value in expected.items():
         if ref.get(key) != value:
-            errors.append(
-                f"E4.1 Person Mask Contract Violation: {path}.{key} must equal {value!r}."
-            )
+            errors.append(f"E4.1 Person Mask Contract Violation: {path}.{key} must equal {value!r}.")
 
     shape = ref.get("shape")
     if not isinstance(shape, list) or len(shape) != 3:
-        errors.append(
-            f"E4.1 Person Mask Contract Violation: {path}.shape must be [frame_count, height, width]."
-        )
+        errors.append(f"E4.1 Person Mask Contract Violation: {path}.shape must be [frame_count, height, width].")
     else:
         expected_shape = [frame_count, height, width]
         if all(isinstance(value, int) for value in expected_shape) and shape != expected_shape:
-            errors.append(
-                f"E4.1 Person Mask Contract Violation: {path}.shape {shape} must equal {expected_shape}."
-            )
+            errors.append(f"E4.1 Person Mask Contract Violation: {path}.shape {shape} must equal {expected_shape}.")
 
     if isinstance(frame_count, int) and frame_count > 0:
         if ref.get("frame_start") != 0:
             errors.append(f"E4.1 Person Mask Contract Violation: {path}.frame_start must be 0.")
         if ref.get("frame_end") != frame_count - 1:
-            errors.append(
-                f"E4.1 Person Mask Contract Violation: {path}.frame_end must equal frame_count - 1."
-            )
+            errors.append(f"E4.1 Person Mask Contract Violation: {path}.frame_end must equal frame_count - 1.")
 
     metadata = ref.get("metadata")
     if not isinstance(metadata, dict):
@@ -129,12 +117,109 @@ def _validate_person_mask_ref(
                 "'row_major_binary_rle_v1'."
             )
         if metadata.get("foreground_value") != 1 or metadata.get("background_value") != 0:
-            errors.append(
-                f"E4.1 Person Mask Contract Violation: {path} must declare foreground=1/background=0."
-            )
+            errors.append(f"E4.1 Person Mask Contract Violation: {path} must declare foreground=1/background=0.")
         if "missing_frame_value" not in metadata or metadata.get("missing_frame_value") is not None:
             errors.append(
                 f"E4.1 Person Mask Contract Violation: {path}.metadata.missing_frame_value must be null."
+            )
+    return errors
+
+
+def _is_sha256(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value.lower())
+
+
+def _validate_e4_point_tracks_extension(
+    extension: Any,
+    *,
+    frame_count: Any,
+    declared_character_ids: set[Any],
+) -> list[str]:
+    path = "extensions.e4_point_tracks"
+    if not isinstance(extension, dict):
+        return [f"E4.2 Point Tracks Contract Violation: {path} must be an object."]
+    errors: list[str] = []
+    expected = {
+        "enabled": True,
+        "algorithm": "opencv_shi_tomasi_pyr_lk_v1",
+        "coordinate_space": "pixel_xy",
+        "mask_constrained": True,
+        "shot_boundary_reset": True,
+        "interpolation": False,
+    }
+    for key, value in expected.items():
+        if extension.get(key) != value:
+            errors.append(f"E4.2 Point Tracks Contract Violation: {path}.{key} must equal {value!r}.")
+
+    max_points = extension.get("max_points")
+    if not isinstance(max_points, int) or max_points <= 0:
+        errors.append(f"E4.2 Point Tracks Contract Violation: {path}.max_points must be a positive integer.")
+    config_sha = extension.get("config_sha256")
+    if not _is_sha256(config_sha):
+        errors.append(f"E4.2 Point Tracks Contract Violation: {path}.config_sha256 must be SHA256 hex.")
+
+    rows = extension.get("characters")
+    if not isinstance(rows, dict):
+        return errors + [f"E4.2 Point Tracks Contract Violation: {path}.characters must be an object."]
+    for character_id, row in rows.items():
+        row_path = f"{path}.characters[{character_id!r}]"
+        if character_id not in declared_character_ids:
+            errors.append(
+                f"E4.2 Point Tracks Cross-Reference Violation: {row_path} does not match characters[].character_id."
+            )
+        if not isinstance(row, dict):
+            errors.append(f"E4.2 Point Tracks Contract Violation: {row_path} must be an object.")
+            continue
+        ref = row.get("track_points_ref")
+        if ref is None:
+            continue
+        if not isinstance(ref, dict):
+            errors.append(f"E4.2 Point Tracks Contract Violation: {row_path}.track_points_ref must be a ref or null.")
+            continue
+        ref_path = f"{row_path}.track_points_ref"
+        ref_expected = {
+            "format": "npz",
+            "dtype": "float32",
+            "axes": ["frame", "point_slot", "xy"],
+            "unit": "px",
+            "coordinate_space": "pixel_xy",
+            "sampling": "per_frame",
+            "nan_policy": "preserve",
+            "interpolation_policy": "none",
+        }
+        for key, value in ref_expected.items():
+            if ref.get(key) != value:
+                errors.append(f"E4.2 Point Tracks Contract Violation: {ref_path}.{key} must equal {value!r}.")
+        if isinstance(frame_count, int) and isinstance(max_points, int):
+            if ref.get("shape") != [frame_count, max_points, 2]:
+                errors.append(
+                    f"E4.2 Point Tracks Contract Violation: {ref_path}.shape must equal "
+                    f"[{frame_count}, {max_points}, 2]."
+                )
+            if ref.get("frame_start") != 0 or ref.get("frame_end") != frame_count - 1:
+                errors.append(f"E4.2 Point Tracks Contract Violation: {ref_path} must cover the full timeline.")
+        if not _is_sha256(ref.get("checksum_sha256")):
+            errors.append(f"E4.2 Point Tracks Contract Violation: {ref_path}.checksum_sha256 must be SHA256 hex.")
+        metadata = ref.get("metadata")
+        if not isinstance(metadata, dict):
+            errors.append(f"E4.2 Point Tracks Contract Violation: {ref_path}.metadata is required.")
+            continue
+        metadata_expected = {
+            "array_key": "positions_xy",
+            "valid_array_key": "valid",
+            "error_array_key": "tracking_error",
+            "track_id_array_key": "track_id",
+            "algorithm": "opencv_shi_tomasi_pyr_lk_v1",
+            "mask_constraint": "character.person_mask_ref",
+            "point_slot_semantics": "reusable_slot_track_id_disambiguates_generation",
+            "shot_boundary_reset": True,
+        }
+        for key, value in metadata_expected.items():
+            if metadata.get(key) != value:
+                errors.append(f"E4.2 Point Tracks Contract Violation: {ref_path}.metadata.{key} must equal {value!r}.")
+        if metadata.get("config_sha256") != config_sha:
+            errors.append(
+                f"E4.2 Point Tracks Contract Violation: {ref_path}.metadata.config_sha256 must match extension config."
             )
     return errors
 
@@ -256,5 +341,15 @@ class BlueprintValidator:
                             path=f"characters[{index}].person_mask_ref",
                         )
                     )
+
+        extensions = blueprint_data.get("extensions")
+        if isinstance(extensions, dict) and "e4_point_tracks" in extensions:
+            errors.extend(
+                _validate_e4_point_tracks_extension(
+                    extensions.get("e4_point_tracks"),
+                    frame_count=frame_count,
+                    declared_character_ids=declared_char_ids,
+                )
+            )
 
         return (len(errors) == 0, errors)
