@@ -5,9 +5,9 @@ import hashlib
 import pytest
 
 from packages.pipeline_core.e12_runtime import (
-    E12RuntimePaths,
     FACE_TASK_URL,
     HAND_TASK_URL,
+    E12RuntimePaths,
     _download_verified,
 )
 
