@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from math import isfinite
 from statistics import fmean
-from typing import Sequence
 
 
 class TrackConfirmationError(ValueError):
