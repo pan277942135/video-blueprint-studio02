@@ -5,15 +5,18 @@ on:
     branches: [ main, master ]
     paths:
       - "packages/pipeline_core/micro_motion.py"
+      - "packages/pipeline_core/micro_motion_v2.py"
       - "packages/pipeline_core/e8_media_pipeline.py"
       - "packages/pipeline_core/surface_motion.py"
       - "packages/blueprint_schema/micro_motion_contract.py"
+      - "packages/blueprint_schema/micro_motion_v2_contract.py"
       - "packages/blueprint_schema/surface_motion_contract.py"
       - "packages/blueprint_schema/composite_validator.py"
       - "scripts/build_e8_cert_stimulus.py"
       - "scripts/certify_micro_motion_e8.py"
       - "scripts/run_pipeline_job.py"
       - "tests/unit/test_e8_micro_motion.py"
+      - "tests/unit/test_e8_micro_motion_v2.py"
       - ".github/workflows/e8-micro-motion-certification.yml"
   workflow_dispatch:
 
@@ -74,7 +77,7 @@ jobs:
           test "$(cut -d' ' -f1 .cert/pose.sha256)" = "77ffc7e802acf10951c353e8bc68b4f05218121177ceaea163aa124436ba6fb7"
           test "$(cut -d' ' -f1 .cert/mask.sha256)" = "ec670f7ee9e20bd7931e15f15b7016f7fe531baaab81f2e6153382d046111885"
 
-      - name: Build real-human video with certified torso-local periodic geometry
+      - name: Build real-human video with certified distal-limb periodic geometry
         run: |
           curl --fail --location --retry 3 -o .cert/person.jpg https://raw.githubusercontent.com/open-mmlab/mmpose/main/tests/data/coco/000000197388.jpg
           python scripts/build_e8_cert_stimulus.py \
