@@ -224,6 +224,96 @@ def _validate_e4_point_tracks_extension(
     return errors
 
 
+def _validate_e4_dense_flow_extension(
+    extension: Any,
+    *,
+    frame_count: Any,
+    source_width: Any,
+    source_height: Any,
+) -> list[str]:
+    path = "extensions.e4_dense_flow"
+    if not isinstance(extension, dict):
+        return [f"E4.3 Dense Flow Contract Violation: {path} must be an object."]
+    errors: list[str] = []
+    expected = {
+        "enabled": True,
+        "algorithm": "opencv_farneback_v1",
+        "coordinate_space": "pixel_xy",
+        "vector_unit": "px",
+        "shot_boundary_reset": True,
+        "interpolation": False,
+    }
+    for key, value in expected.items():
+        if extension.get(key) != value:
+            errors.append(f"E4.3 Dense Flow Contract Violation: {path}.{key} must equal {value!r}.")
+    config_sha = extension.get("config_sha256")
+    if not _is_sha256(config_sha):
+        errors.append(f"E4.3 Dense Flow Contract Violation: {path}.config_sha256 must be SHA256 hex.")
+
+    ref = extension.get("flow_ref")
+    if not isinstance(ref, dict):
+        return errors + [f"E4.3 Dense Flow Contract Violation: {path}.flow_ref must be a TimeSeriesRef."]
+    ref_path = f"{path}.flow_ref"
+    ref_expected = {
+        "format": "npz",
+        "dtype": "float32",
+        "axes": ["frame", "grid_y", "grid_x", "xy"],
+        "unit": "px",
+        "coordinate_space": "pixel_xy",
+        "sampling": "per_frame",
+        "nan_policy": "preserve",
+        "interpolation_policy": "none",
+    }
+    for key, value in ref_expected.items():
+        if ref.get(key) != value:
+            errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.{key} must equal {value!r}.")
+    shape = ref.get("shape")
+    if not isinstance(shape, list) or len(shape) != 4 or shape[-1] != 2:
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.shape must be [frame, grid_y, grid_x, 2].")
+    elif isinstance(frame_count, int) and shape[0] != frame_count:
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.shape[0] must equal frame_count.")
+    if (
+        isinstance(frame_count, int)
+        and frame_count > 0
+        and (ref.get("frame_start") != 0 or ref.get("frame_end") != frame_count - 1)
+    ):
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path} must cover the full timeline.")
+    if not _is_sha256(ref.get("checksum_sha256")):
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.checksum_sha256 must be SHA256 hex.")
+
+    metadata = ref.get("metadata")
+    if not isinstance(metadata, dict):
+        return errors + [f"E4.3 Dense Flow Contract Violation: {ref_path}.metadata is required."]
+    metadata_expected = {
+        "array_key": "flow_xy",
+        "valid_frame_array_key": "valid_frame",
+        "algorithm": "opencv_farneback_v1",
+        "vector_semantics": "previous_frame_to_current_frame_displacement",
+        "vectors_scaled_to_source_pixels": True,
+        "shot_boundary_reset": True,
+    }
+    for key, value in metadata_expected.items():
+        if metadata.get(key) != value:
+            errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.metadata.{key} must equal {value!r}.")
+    if metadata.get("config_sha256") != config_sha:
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.metadata.config_sha256 must match extension config.")
+    if isinstance(source_width, int) and metadata.get("source_width") != source_width:
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.metadata.source_width must match source_video.width.")
+    if isinstance(source_height, int) and metadata.get("source_height") != source_height:
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.metadata.source_height must match source_video.height.")
+    if (
+        isinstance(shape, list)
+        and len(shape) == 4
+        and (metadata.get("grid_height") != shape[1] or metadata.get("grid_width") != shape[2])
+    ):
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path} grid metadata must match shape.")
+    for key in ("grid_to_source_scale_x", "grid_to_source_scale_y"):
+        value = metadata.get(key)
+        if not isinstance(value, (int, float)) or value <= 0:
+            errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.metadata.{key} must be positive.")
+    return errors
+
+
 class BlueprintValidator:
     def __init__(self, schema: dict[str, Any] | None = None):
         if schema is None:
@@ -314,10 +404,10 @@ class BlueprintValidator:
                                             f"total frame_count ({frame_count})."
                                         )
 
+        source_video = blueprint_data.get("source_video")
+        height = source_video.get("height") if isinstance(source_video, dict) else None
+        width = source_video.get("width") if isinstance(source_video, dict) else None
         if isinstance(characters, list):
-            source_video = blueprint_data.get("source_video")
-            height = source_video.get("height") if isinstance(source_video, dict) else None
-            width = source_video.get("width") if isinstance(source_video, dict) else None
             for index, character in enumerate(characters):
                 if not isinstance(character, dict):
                     continue
@@ -349,6 +439,15 @@ class BlueprintValidator:
                     extensions.get("e4_point_tracks"),
                     frame_count=frame_count,
                     declared_character_ids=declared_char_ids,
+                )
+            )
+        if isinstance(extensions, dict) and "e4_dense_flow" in extensions:
+            errors.extend(
+                _validate_e4_dense_flow_extension(
+                    extensions.get("e4_dense_flow"),
+                    frame_count=frame_count,
+                    source_width=width,
+                    source_height=height,
                 )
             )
 
