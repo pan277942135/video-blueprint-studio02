@@ -306,7 +306,10 @@ def run_camera_motion(
         zoom_proxy[0] = 1.0
 
         cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened() or not cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start):
+        if not cap.isOpened():
+            cap.release()
+            raise CameraMotionError(f"could not open normalized video for shot {shot_id}")
+        if frame_start > 0 and not cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start):
             cap.release()
             raise CameraMotionError(f"could not seek normalized video to shot {shot_id}")
         previous_gray: np.ndarray | None = None
@@ -359,10 +362,16 @@ def run_camera_motion(
                 active_points = good_current
                 free_slots = np.setdiff1d(np.arange(config.max_points, dtype=np.int32), active_slots, assume_unique=True)
                 if len(free_slots):
-                    seed_mask = background[global_idx].copy()
+                    seed_mask_u8 = background[global_idx].astype(np.uint8) * 255
                     for x, y in active_points:
-                        cv2.circle(seed_mask, (round(float(x)), round(float(y))), round(config.min_distance_px), False, -1)
-                    seeds = _seed(gray, seed_mask, len(free_slots), config)
+                        cv2.circle(
+                            seed_mask_u8,
+                            (round(float(x)), round(float(y))),
+                            round(config.min_distance_px),
+                            0,
+                            -1,
+                        )
+                    seeds = _seed(gray, seed_mask_u8 != 0, len(free_slots), config)
                     if len(seeds):
                         new_slots = free_slots[: len(seeds)]
                         active_slots = np.concatenate((active_slots, new_slots))
@@ -411,7 +420,12 @@ def run_camera_motion(
             coordinate_space="pixel_xy",
             frame_start=frame_start,
             frame_end=frame_end,
-            metadata={**common, "array_key": "frame_to_frame_affine", "stabilization_array_key": "stabilization_affine", "matrix_semantics": "previous_frame_to_current_frame_affine"},
+            metadata={
+                **common,
+                "array_key": "frame_to_frame_affine",
+                "stabilization_array_key": "stabilization_affine",
+                "matrix_semantics": "previous_frame_to_current_frame_affine",
+            },
         )
         background_ref = _ref(
             uri=uri,
@@ -422,7 +436,12 @@ def run_camera_motion(
             coordinate_space="pixel_xy",
             frame_start=frame_start,
             frame_end=frame_end,
-            metadata={**common, "array_key": "background_points_xy", "valid_array_key": "background_valid", "point_slot_semantics": "persistent_within_shot_reseedable_slot"},
+            metadata={
+                **common,
+                "array_key": "background_points_xy",
+                "valid_array_key": "background_valid",
+                "point_slot_semantics": "persistent_within_shot_reseedable_slot",
+            },
         )
         zoom_ref = _ref(
             uri=uri,
@@ -433,7 +452,11 @@ def run_camera_motion(
             coordinate_space="none",
             frame_start=frame_start,
             frame_end=frame_end,
-            metadata={**common, "array_key": "zoom_proxy", "inlier_ratio_array_key": "ransac_inlier_ratio"},
+            metadata={
+                **common,
+                "array_key": "zoom_proxy",
+                "inlier_ratio_array_key": "ransac_inlier_ratio",
+            },
         )
         shot["camera_motion_id"] = camera_motion_id
         camera_rows.append(
@@ -492,7 +515,12 @@ def run_camera_motion(
         "shots": report_rows,
     }
     emitted[report_uri] = report
-    report_ref = {"kind": "camera_motion", "uri": report_uri, "sha256": _json_sha256(report), "mime_type": "application/json"}
+    report_ref = {
+        "kind": "camera_motion",
+        "uri": report_uri,
+        "sha256": _json_sha256(report),
+        "mime_type": "application/json",
+    }
     extension = {
         "enabled": True,
         "algorithm": "opencv_background_lk_ransac_affine_v1",
@@ -506,5 +534,9 @@ def run_camera_motion(
         "identity_inference_performed": False,
         "biometric_embedding_exported": False,
     }
-    quality = {"coverage": round(overall_coverage, 6), "score": round(score, 6), "confidence_available": True}
+    quality = {
+        "coverage": round(overall_coverage, 6),
+        "score": round(score, 6),
+        "confidence_available": True,
+    }
     return camera, emitted, report_ref, extension, quality
