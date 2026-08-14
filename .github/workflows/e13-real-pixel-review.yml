@@ -85,7 +85,7 @@ jobs:
             --confidence-threshold 0.30 \
             | tee .cert/e13/e13_review_builder.log
 
-      - name: Assert E13/E14 evidence and E15 face coverage
+      - name: Assert E13-E16 evidence contract
         if: success()
         run: |
           set -euo pipefail
@@ -110,7 +110,6 @@ jobs:
           assert review['status'] == 'review_pack_ready', review
           assert review['manual_verdict_required'] is True, review
           assert review['automatic_perceptual_pass'] is False, review
-          assert review['review_frames'], review
           assert review['character_count'] > 0, review
 
           # E14: preserve low-threshold candidate recall but export only the real person.
@@ -125,18 +124,33 @@ jobs:
               if not item['confirmed']
           ), tracking
 
-          # E15: the person's face is visibly available through a substantial part
-          # of this pinned walking sequence. The legacy whole-person FaceLandmarker
-          # crop detected only 1/100 frames. Require a meaningful recovery while
-          # keeping MediaPipe's approved 0.5 confidence gates unchanged.
+          # E15: retain the real face-coverage improvement with approved 0.5 gates.
           assert len(face_hands['characters']) == 1, face_hands
           face_row = face_hands['characters'][0]
           assert face_row['present_frames'] == 100, face_row
           assert face_row['face_frames'] >= 20, face_row
 
-          for row in review['review_frames']:
+          # E16: preserve shot keyframes but expand manual evidence across the full
+          # normalized timeline. Detail overlays must expose measured face/hand
+          # geometry directly in the review pack rather than via an ad-hoc script.
+          review_frames = review['review_frames']
+          assert len(review_frames) == 12, review_frames
+          review_indices = [row['frame_idx'] for row in review_frames]
+          assert len(set(review_indices)) == len(review_indices), review_indices
+          assert {0, 49, 99}.issubset(review_indices), review_indices
+          assert min(review_indices) == 0 and max(review_indices) == 99, review_indices
+          assert any(row['kind'] == 'timeline_sample' for row in review_frames), review_frames
+          detail_counts = review['review_frame_detail_counts']
+          assert set(detail_counts) == {'face', 'left_hand', 'right_hand'}, detail_counts
+          assert detail_counts['face'] >= 1, (detail_counts, review_frames)
+          assert detail_counts['face'] <= face_row['face_frames'], (detail_counts, face_row)
+          assert detail_counts['left_hand'] <= face_row['left_hand_frames'], (detail_counts, face_row)
+          assert detail_counts['right_hand'] <= face_row['right_hand_frames'], (detail_counts, face_row)
+          for row in review_frames:
+              assert set(row['detail_presence']) == {'face', 'left_hand', 'right_hand'}, row
               image = Path('.cert/e13/review') / row['comparison_image']
               assert image.is_file() and image.stat().st_size > 0, row
+
           print(json.dumps({
               'source_sha256': source['sha256'],
               'machine_gate': run['machine_gate'],
@@ -150,7 +164,9 @@ jobs:
               'right_hand_frames': face_row['right_hand_frames'],
               'character_count': review['character_count'],
               'shot_count': review['shot_count'],
-              'review_frame_count': len(review['review_frames']),
+              'review_frame_count': len(review_frames),
+              'review_frame_indices': review_indices,
+              'review_frame_detail_counts': detail_counts,
               'module_scores': review['module_scores'],
           }, indent=2, sort_keys=True))
           PY
