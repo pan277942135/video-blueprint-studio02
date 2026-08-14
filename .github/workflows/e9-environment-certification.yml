@@ -1,16 +1,22 @@
-name: E9 Environment Certification
+name: E9 Environment + E10 Bundle Certification
 
 on:
   pull_request:
     branches: [ main, master ]
     paths:
+      - "apps/api/main.py"
+      - "packages/pipeline_core/artifact_integrity.py"
+      - "packages/pipeline_core/bundle_exporter.py"
+      - "packages/pipeline_core/production_media_pipeline.py"
       - "packages/pipeline_core/environment_photometry.py"
       - "packages/pipeline_core/e9_media_pipeline.py"
       - "packages/blueprint_schema/environment_contract.py"
       - "packages/blueprint_schema/composite_validator.py"
       - "scripts/certify_environment_e9.py"
+      - "scripts/certify_bundle_e10.py"
       - "scripts/run_pipeline_job.py"
       - "tests/unit/test_e9_environment.py"
+      - "tests/unit/test_e10_artifact_integrity.py"
       - ".github/workflows/e9-environment-certification.yml"
   workflow_dispatch:
 
@@ -18,7 +24,7 @@ permissions:
   contents: read
 
 jobs:
-  environment-certification:
+  environment-bundle-certification:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -93,22 +99,35 @@ jobs:
             --stimulus .cert/stimulus.json \
             --output .cert/e9_environment_certification.json 2>&1 | tee .cert/e9_environment_certification.log
 
+      - name: Run E2-to-E10 physical Bundle certification
+        run: |
+          set -o pipefail
+          python scripts/certify_bundle_e10.py \
+            --video .cert/environment_smoke.mp4 \
+            --det-config "$(cat .cert/det_config.txt)" --det-checkpoint .cert/rtmdet_tiny.pth \
+            --mask-config "$(cat .cert/mask_config.txt)" --mask-checkpoint .cert/rtmdet_ins_tiny.pth \
+            --output .cert/e10_bundle_certification.json 2>&1 | tee .cert/e10_bundle_certification.log
+
       - name: Show certification evidence
         if: always()
         run: |
           cat .cert/stimulus.json || true
           cat .cert/e9_environment_certification.log || true
           cat .cert/e9_environment_certification.json || true
+          cat .cert/e10_bundle_certification.log || true
+          cat .cert/e10_bundle_certification.json || true
 
       - name: Upload certification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e9-environment-certification
+          name: e9-e10-production-certification
           path: |
             .cert/detector.sha256
             .cert/mask.sha256
             .cert/stimulus.json
             .cert/e9_environment_certification.log
             .cert/e9_environment_certification.json
+            .cert/e10_bundle_certification.log
+            .cert/e10_bundle_certification.json
           if-no-files-found: warn

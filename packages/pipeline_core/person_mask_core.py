@@ -43,11 +43,6 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
-def _json_sha256(value: Any) -> str:
-    data = json.dumps(value, indent=2, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(data).hexdigest()
-
-
 def _atomic_json(path: str, value: dict[str, Any]) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     temporary = f"{path}.tmp"
@@ -256,11 +251,13 @@ def run_person_mask_refinement(
         "interpolation": False,
         "characters": report_rows,
     }
-    emitted[report_uri] = report
+    report_path = os.path.join(output_dir, report_uri.replace("/", os.sep))
+    _atomic_json(report_path, report)
+    emitted[report_uri] = report_path
     report_ref = {
         "kind": "person_mask",
         "uri": report_uri,
-        "sha256": _json_sha256(report),
+        "sha256": _sha256_file(report_path),
         "mime_type": "application/json",
     }
     quality = {

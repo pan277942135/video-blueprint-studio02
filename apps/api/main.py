@@ -19,10 +19,11 @@ from packages.blueprint_schema.models import (
     VideoRecord,
 )
 from packages.blueprint_schema.validator import BlueprintValidator
+from packages.pipeline_core.artifact_integrity import require_blueprint_artifacts, validate_blueprint_artifacts
 from packages.pipeline_core.bundle_exporter import create_bundle_zip
 from packages.pipeline_core.media_normalizer import MediaNormalizationError
 from packages.pipeline_core.media_probe import MediaProbeError
-from packages.pipeline_core.real_media_pipeline import run_real_media_pipeline
+from packages.pipeline_core.production_media_pipeline import run_production_media_pipeline
 
 app = FastAPI(
     title="Video Blueprint Studio API",
@@ -129,7 +130,7 @@ def _execute_real_analysis(analysis_id: str):
         return
 
     try:
-        blueprint, sidecars = run_real_media_pipeline(
+        blueprint, sidecars = run_production_media_pipeline(
             job_id=analysis_id,
             video_file_name=video_name,
             video_sha256=video_sha256,
@@ -149,6 +150,7 @@ def _execute_real_analysis(analysis_id: str):
             {"stage": "pose", "status": "failed", "progress": 0.0},
             {"stage": "camera", "status": "failed", "progress": 0.0},
             {"stage": "micro_motion", "status": "failed", "progress": 0.0},
+            {"stage": "environment", "status": "failed", "progress": 0.0},
         ]
         job_store.update_analysis(
             analysis_id,
@@ -160,14 +162,6 @@ def _execute_real_analysis(analysis_id: str):
         return
 
     is_valid, val_errors = validator.validate(blueprint)
-    val_report = {
-        "valid": is_valid,
-        "schema_version": "Draft 2020-12",
-        "validated_at": datetime.datetime.now(datetime.UTC).isoformat(),
-        "errors": val_errors,
-        "summary": {"passed_rules": max(0, 25 - len(val_errors)), "failed_rules": len(val_errors)},
-    }
-
     if not is_valid:
         job_store.update_analysis(
             analysis_id,
@@ -177,19 +171,40 @@ def _execute_real_analysis(analysis_id: str):
         )
         return
 
-    job_store.store_blueprint(analysis_id, blueprint, sidecars)
+    try:
+        artifact_integrity = require_blueprint_artifacts(blueprint, sidecars)
+        val_report = {
+            "valid": True,
+            "schema_version": "Draft 2020-12",
+            "validated_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            "errors": [],
+            "summary": {"passed_rules": 25, "failed_rules": 0},
+            "artifact_integrity": artifact_integrity,
+        }
+        temp_dir = tempfile.gettempdir()
+        zip_path = os.path.join(temp_dir, f"bundle_{analysis_id}.zip")
+        create_bundle_zip(blueprint, sidecars, val_report, zip_path)
+    except Exception as e:  # noqa: BLE001
+        job_store.update_analysis(
+            analysis_id,
+            status="failed",
+            progress=0.0,
+            error={"code": "BUNDLE_INTEGRITY_FAILED", "message": str(e)},
+        )
+        return
 
-    temp_dir = tempfile.gettempdir()
-    zip_path = os.path.join(temp_dir, f"bundle_{analysis_id}.zip")
-    create_bundle_zip(blueprint, sidecars, val_report, zip_path)
+    job_store.store_blueprint(analysis_id, blueprint, sidecars)
     job_store.store_bundle_path(analysis_id, zip_path)
 
+    processing_stages = blueprint.get("processing", {}).get("stages", [])
     updated_stages = [
-        {"stage": "shots", "status": "succeeded", "progress": 1.0},
-        {"stage": "people", "status": "succeeded", "progress": 1.0},
-        {"stage": "pose", "status": "succeeded", "progress": 1.0},
-        {"stage": "camera", "status": "succeeded", "progress": 1.0},
-        {"stage": "micro_motion", "status": "succeeded", "progress": 1.0},
+        {
+            "stage": str(stage.get("name")),
+            "status": str(stage.get("status", "succeeded")),
+            "progress": float(stage.get("progress", 1.0)),
+        }
+        for stage in processing_stages
+        if isinstance(stage, dict) and isinstance(stage.get("name"), str)
     ]
 
     job_store.update_analysis(
@@ -244,6 +259,7 @@ def retry_analysis(analysis_id: UUID, req: RetryAnalysisRequest | None = None):
         {"stage": "pose", "status": "pending", "progress": 0.0},
         {"stage": "camera", "status": "pending", "progress": 0.0},
         {"stage": "micro_motion", "status": "pending", "progress": 0.0},
+        {"stage": "environment", "status": "pending", "progress": 0.0},
     ]
 
     updated = job_store.update_analysis(
@@ -309,12 +325,19 @@ def validate_analysis(analysis_id: UUID):
     if not bp:
         raise HTTPException(status_code=404, detail=f"Analysis {analysis_id_str} not found")
 
-    is_valid, errors = validator.validate(bp)
+    schema_valid, errors = validator.validate(bp)
+    sidecars = job_store.sidecars.get(analysis_id_str, {})
+    artifact_result = validate_blueprint_artifacts(bp, sidecars)
+    combined_errors = list(errors) + list(artifact_result["errors"])
     return ValidationReport(
-        valid=is_valid,
+        valid=schema_valid and artifact_result["valid"],
         validated_at=datetime.datetime.now(datetime.UTC).isoformat(),
-        errors=errors,
-        summary={"passed_rules": max(0, 25 - len(errors)), "failed_rules": len(errors)},
+        errors=combined_errors,
+        summary={
+            "passed_rules": max(0, 25 - len(combined_errors)),
+            "failed_rules": len(combined_errors),
+            "artifact_warnings": artifact_result["warnings"],
+        },
     )
 
 
