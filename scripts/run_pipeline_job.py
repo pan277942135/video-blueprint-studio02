@@ -7,6 +7,7 @@ import tempfile
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from packages.blueprint_schema import BlueprintValidator
+from packages.pipeline_core.artifact_integrity import require_blueprint_artifacts
 from packages.pipeline_core.bundle_exporter import create_bundle_zip
 from packages.pipeline_core.production_media_pipeline import run_production_media_pipeline
 
@@ -40,6 +41,7 @@ def main():
 
         validator = BlueprintValidator()
         is_valid, errors = validator.validate(blueprint)
+        artifact_integrity = require_blueprint_artifacts(blueprint, sidecars) if is_valid else None
 
         val_report = {
             "valid": is_valid,
@@ -47,6 +49,7 @@ def main():
             "validated_at": datetime.datetime.now(datetime.UTC).isoformat(),
             "errors": errors,
             "summary": {"passed_rules": max(0, 25 - len(errors)), "failed_rules": len(errors)},
+            "artifact_integrity": artifact_integrity,
         }
 
         with open(blueprint_out_path, "w", encoding="utf-8") as f:
