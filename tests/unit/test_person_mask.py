@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -104,6 +105,13 @@ def test_person_mask_exports_explicit_missing_frames(tmp_path: Path) -> None:
     decoded = decode_rle(payload["frames"][0]["counts"], 48, 64)
     assert decoded.dtype == np.bool_
     assert np.any(decoded)
+
+    report_path = Path(emitted[report_ref["uri"]])
+    assert report_path.is_file()
+    assert report_ref["sha256"] == hashlib.sha256(report_path.read_bytes()).hexdigest()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["stage"] == "person_mask"
+    assert report["characters"][0]["mask_observed_frames"] == 2
 
 
 def test_zero_observations_keep_null_ref_and_no_orphan_mask_file(tmp_path: Path) -> None:
