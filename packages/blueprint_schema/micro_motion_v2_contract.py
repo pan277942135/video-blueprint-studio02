@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 ALGORITHM = "body_local_sparse_periodicity_v2"
-SELECTION_METHOD = "per_track_frequency_consensus_v1"
+SELECTION_METHOD = "per_track_frequency_locked_consensus_v2"
 _ALLOWED_KINDS = {"periodic_micro_motion", "unclassified", "not_detected"}
 
 
@@ -95,7 +95,7 @@ def validate_micro_motion_v2_contract(blueprint: dict[str, Any]) -> list[str]:
         "occlusion_metric_semantics": "observation_dropout_proxy_not_semantic_occlusion",
         "pose_leakage_semantics": "body_frame_energy_correlation_weighted_by_frequency_consensus_support",
         "track_periodicity_floor": 0.25,
-        "minimum_consensus_tracks": 3,
+        "minimum_consensus_tracks": 4,
     }
     for key, value in expected_extension.items():
         if extension.get(key) != value:
@@ -216,8 +216,8 @@ def validate_micro_motion_v2_contract(blueprint: dict[str, Any]) -> list[str]:
             expected_support = selected / candidate if candidate else 0.0
             if abs(float(support) - expected_support) > 1e-6:
                 errors.append(f"E8 v2 MicroMotion Contract Violation: consensus support must equal selected/candidate for {character_id!r}.")
-        if kind == "periodic_micro_motion" and (not isinstance(selected, int) or selected < 3):
-            errors.append(f"E8 v2 MicroMotion Quality Violation: periodic output requires at least three frequency-consensus tracks for {character_id!r}.")
+        if kind == "periodic_micro_motion" and (not isinstance(selected, int) or selected < 4):
+            errors.append(f"E8 v2 MicroMotion Quality Violation: periodic output requires at least four frequency-locked consensus tracks for {character_id!r}.")
 
         usable = micro.get("usable_for_generation") is True
         if usable:
