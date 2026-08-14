@@ -38,7 +38,8 @@ class SparseMotionConfig:
             raise SparseMotionError("invalid LK/reseed configuration")
 
     def token(self) -> str:
-        return hashlib.sha256(json.dumps(self.__dict__, sort_keys=True).encode()).hexdigest()
+        payload = json.dumps(self.__dict__, sort_keys=True).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 
     @classmethod
     def from_environment(cls) -> SparseMotionConfig | None:
@@ -134,7 +135,7 @@ def lk_step(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if points.size == 0:
         return points.copy(), np.empty(0, dtype=np.bool_), np.empty(0, dtype=np.float32)
-    moved, status, errors = cv2.calcOpticalFlowPyrLK(
+    moved, status, errors = cv2.calcOpticalFlowPyrLK(  # type: ignore[call-overload]
         previous_gray,
         gray,
         points.reshape(-1, 1, 2),
