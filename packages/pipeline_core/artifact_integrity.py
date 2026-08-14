@@ -21,7 +21,23 @@ def _sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def sidecar_bytes(value: Any) -> bytes:
+def _json_candidates(value: Any) -> list[bytes]:
+    candidates = [
+        json.dumps(value, indent=2).encode("utf-8"),
+        json.dumps(value, indent=2, sort_keys=True).encode("utf-8"),
+        json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8"),
+    ]
+    candidates.extend(candidate + b"\n" for candidate in list(candidates))
+    unique: list[bytes] = []
+    seen: set[bytes] = set()
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            unique.append(candidate)
+    return unique
+
+
+def sidecar_bytes(value: Any, expected_sha256: str | None = None) -> bytes:
     if isinstance(value, (str, os.PathLike)):
         path = str(value)
         if not os.path.isfile(path):
@@ -30,7 +46,16 @@ def sidecar_bytes(value: Any) -> bytes:
             return handle.read()
     if isinstance(value, bytes):
         return value
-    return json.dumps(value, indent=2).encode("utf-8")
+
+    candidates = _json_candidates(value)
+    if expected_sha256 is None:
+        return candidates[0]
+    matches = [candidate for candidate in candidates if _sha256(candidate) == expected_sha256]
+    if not matches:
+        raise ArtifactIntegrityError(
+            "in-memory JSON sidecar cannot be deterministically materialized to its declared SHA256"
+        )
+    return matches[0]
 
 
 def _safe_artifact_uri(uri: str) -> bool:
@@ -65,6 +90,29 @@ def _artifact_uri_occurrences(blueprint: dict[str, Any]) -> tuple[set[str], list
             if key.endswith("_uri") and isinstance(value, str) and value.startswith("artifacts/"):
                 referenced.add(value)
     return referenced, hash_refs
+
+
+def resolve_sidecar_bytes(blueprint: dict[str, Any], sidecars: dict[str, Any]) -> dict[str, bytes]:
+    _, hash_refs = _artifact_uri_occurrences(blueprint)
+    expected_by_uri: dict[str, set[str]] = {}
+    for _, ref in hash_refs:
+        uri = ref.get("uri")
+        if not isinstance(uri, str):
+            continue
+        expected = ref.get("checksum_sha256")
+        if not isinstance(expected, str):
+            expected = ref.get("sha256")
+        if isinstance(expected, str):
+            expected_by_uri.setdefault(uri, set()).add(expected)
+
+    resolved: dict[str, bytes] = {}
+    for uri, value in sidecars.items():
+        expected_values = expected_by_uri.get(uri, set())
+        if len(expected_values) > 1:
+            raise ArtifactIntegrityError(f"conflicting declared SHA256 values for one artifact URI: {uri}")
+        expected = next(iter(expected_values)) if expected_values else None
+        resolved[uri] = sidecar_bytes(value, expected)
+    return resolved
 
 
 def _validate_npz_ref(
@@ -176,16 +224,18 @@ def validate_blueprint_artifacts(
         if uri not in sidecars:
             errors.append(f"referenced artifact is missing from sidecars: {uri}")
 
+    try:
+        resolved = resolve_sidecar_bytes(blueprint, sidecars)
+    except (OSError, TypeError, ValueError, ArtifactIntegrityError) as exc:
+        errors.append(f"could not materialize sidecars deterministically: {exc}")
+        resolved = {}
+
     checked_hashes: set[tuple[str, str]] = set()
     for path, ref in hash_refs:
         uri = ref.get("uri")
-        if not isinstance(uri, str) or uri not in sidecars:
+        if not isinstance(uri, str) or uri not in resolved:
             continue
-        try:
-            content = sidecar_bytes(sidecars[uri])
-        except (OSError, TypeError, ValueError) as exc:
-            errors.append(f"{path}: could not materialize {uri}: {exc}")
-            continue
+        content = resolved[uri]
         expected = ref.get("checksum_sha256")
         if not isinstance(expected, str):
             expected = ref.get("sha256")
@@ -307,6 +357,7 @@ __all__ = [
     "ArtifactIntegrityError",
     "require_blueprint_artifacts",
     "require_bundle_zip",
+    "resolve_sidecar_bytes",
     "sidecar_bytes",
     "validate_blueprint_artifacts",
     "verify_bundle_zip",
