@@ -156,7 +156,7 @@ def _background_metrics(
         b_chroma = blue[chroma_valid] / channel_sum[chroma_valid]
         chroma = np.asarray([np.median(r_chroma), np.median(b_chroma)], dtype=np.float32)
 
-    sample_mask = background_mask.astype(np.uint8) * 255
+    sample_mask: np.ndarray = background_mask.astype(np.uint8) * 255
     if erosion_radius_px > 0:
         size = erosion_radius_px * 2 + 1
         kernel = np.ones((size, size), dtype=np.uint8)
@@ -473,7 +473,7 @@ def run_environment_photometry(
         ],
         "errors": [],
     }
-    environment = {
+    environment: dict[str, Any] = {
         "background_mask_ref": background_mask_ref,
         "depth_ref": None,
         "luminance_ref": luminance_ref,
