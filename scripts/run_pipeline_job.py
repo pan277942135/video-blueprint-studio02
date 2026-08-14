@@ -7,9 +7,9 @@ import tempfile
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from packages.blueprint_schema.validator import BlueprintValidator
+from packages.blueprint_schema import BlueprintValidator
 from packages.pipeline_core.bundle_exporter import create_bundle_zip
-from packages.pipeline_core.e4_media_pipeline import run_e4_media_pipeline
+from packages.pipeline_core.e5_media_pipeline import run_e5_media_pipeline
 
 
 def main():
@@ -32,7 +32,7 @@ def main():
     report_out_path = os.path.join(temp_dir, f"validation_{job_id}.json")
 
     try:
-        blueprint, sidecars = run_e4_media_pipeline(
+        blueprint, sidecars = run_e5_media_pipeline(
             job_id=job_id,
             video_file_name=file_name,
             video_sha256=sha256,
