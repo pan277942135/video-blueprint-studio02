@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import hashlib
+import os
+from pathlib import Path
+from typing import Any
+
+from packages.pipeline_core.body_local_frame import BodyLocalFrameConfig
+from packages.pipeline_core.camera_motion import CameraMotionConfig
+from packages.pipeline_core.dense_flow import DenseFlowConfig
+from packages.pipeline_core.e8_media_pipeline import run_e8_media_pipeline
+from packages.pipeline_core.environment_photometry import (
+    EnvironmentPhotometryConfig,
+    EnvironmentPhotometryError,
+    run_environment_photometry,
+)
+from packages.pipeline_core.micro_motion import MicroMotionConfig
+from packages.pipeline_core.person_mask import PersonMaskSegmenter
+from packages.pipeline_core.sparse_motion import SparseMotionConfig
+from packages.pipeline_core.surface_motion import SurfaceMotionConfig
+
+
+def _environment_hash(current: str, config: EnvironmentPhotometryConfig) -> str:
+    return hashlib.sha256(f"{current}|environment:{config.token()}".encode()).hexdigest()
+
+
+def run_e9_media_pipeline(
+    job_id: str,
+    video_file_name: str,
+    video_sha256: str,
+    video_path: str,
+    *,
+    person_mask_segmenter: PersonMaskSegmenter | None = None,
+    point_track_config: SparseMotionConfig | None = None,
+    dense_flow_config: DenseFlowConfig | None = None,
+    camera_motion_config: CameraMotionConfig | None = None,
+    body_local_frame_config: BodyLocalFrameConfig | None = None,
+    surface_motion_config: SurfaceMotionConfig | None = None,
+    micro_motion_config: MicroMotionConfig | None = None,
+    environment_config: EnvironmentPhotometryConfig | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    blueprint, sidecars = run_e8_media_pipeline(
+        job_id=job_id,
+        video_file_name=video_file_name,
+        video_sha256=video_sha256,
+        video_path=video_path,
+        person_mask_segmenter=person_mask_segmenter,
+        point_track_config=point_track_config,
+        dense_flow_config=dense_flow_config,
+        camera_motion_config=camera_motion_config,
+        body_local_frame_config=body_local_frame_config,
+        surface_motion_config=surface_motion_config,
+        micro_motion_config=micro_motion_config,
+    )
+    if environment_config is None:
+        environment_config = EnvironmentPhotometryConfig.from_environment()
+    if environment_config is None:
+        return blueprint, sidecars
+
+    normalized_path = sidecars.get("artifacts/normalized/analysis_cfr.mp4")
+    if not isinstance(normalized_path, (str, os.PathLike)) or not os.path.isfile(str(normalized_path)):
+        raise EnvironmentPhotometryError("E9 requires the normalized CFR analysis video")
+    normalized = Path(str(normalized_path))
+    try:
+        artifact_root = str(normalized.parents[2])
+    except IndexError as exc:
+        raise EnvironmentPhotometryError("Could not resolve E9 artifact root") from exc
+
+    environment, environment_sidecars, report_ref, extension, quality = run_environment_photometry(
+        str(normalized_path),
+        blueprint=blueprint,
+        output_dir=artifact_root,
+        sidecars=sidecars,
+        config=environment_config,
+    )
+    sidecars.update(environment_sidecars)
+    blueprint["environment"] = environment
+    blueprint["artifacts"]["reports"].append(report_ref)
+    blueprint["extensions"]["e9_environment"] = extension
+
+    processing = blueprint["processing"]
+    processing["pipeline_version"] = "0.9.0-e9.1"
+    processing["config_hash"] = _environment_hash(str(processing["config_hash"]), environment_config)
+    processing["stages"].append(
+        {
+            "name": "environment",
+            "status": "succeeded",
+            "progress": 1.0,
+            "message": "E9.1 emitted evidence-backed background photometry",
+        }
+    )
+    blueprint["quality"]["module_scores"]["environment"] = float(quality["score"])
+    blueprint["provenance"]["tools"].append(
+        {
+            "module": "environment",
+            "tool": "OpenCV background photometry over inverse E4 person masks",
+            "version": "1",
+            "code_commit": os.environ.get("GITHUB_SHA"),
+            "weights_sha256": None,
+            "config_hash": str(processing["config_hash"]),
+            "license": "PROJECT-CODE + Apache-2.0 (OpenCV)",
+        }
+    )
+    return blueprint, sidecars
+
+
+__all__ = ["run_e9_media_pipeline"]
