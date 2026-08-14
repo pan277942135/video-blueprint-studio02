@@ -261,10 +261,10 @@ def summarize_blueprint_acceptance(
             usable = micro.get("usable_for_generation") is True
             if usable:
                 usable_micro_count += 1
-            for metric in micro_metrics:
+            for metric, values in micro_metrics.items():
                 value = _number(micro.get(metric))
                 if value is not None:
-                    micro_metrics[metric].append(value)
+                    values.append(value)
             if not usable:
                 micro_rejections.append(
                     {
