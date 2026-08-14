@@ -31,7 +31,32 @@ COCO17_EDGES: tuple[tuple[int, int], ...] = (
     (2, 4),
 )
 
+HAND_EDGES: tuple[tuple[int, int], ...] = (
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 4),
+    (0, 5),
+    (5, 6),
+    (6, 7),
+    (7, 8),
+    (5, 9),
+    (9, 10),
+    (10, 11),
+    (11, 12),
+    (9, 13),
+    (13, 14),
+    (14, 15),
+    (15, 16),
+    (13, 17),
+    (17, 18),
+    (18, 19),
+    (19, 20),
+    (0, 17),
+)
+
 _VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+_FACE_POINT_STRIDE = 8
 
 
 @dataclass(frozen=True)
@@ -48,6 +73,105 @@ def sha256_file(path: pathlib.Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _timebase_values(blueprint: dict[str, Any]) -> tuple[int | None, float | None]:
+    raw_timebase = blueprint.get("timebase")
+    timebase: dict[str, Any] = raw_timebase if isinstance(raw_timebase, dict) else {}
+    frame_count = timebase.get("frame_count")
+    frame_duration_us = timebase.get("frame_duration_us")
+
+    normalized_count = frame_count if isinstance(frame_count, int) and frame_count > 0 else None
+    normalized_duration = (
+        float(frame_duration_us)
+        if isinstance(frame_duration_us, (int, float)) and float(frame_duration_us) > 0.0
+        else None
+    )
+    if normalized_count is not None and normalized_duration is not None:
+        return normalized_count, normalized_duration
+
+    fps_num = timebase.get("fps_num")
+    fps_den = timebase.get("fps_den")
+    if (
+        normalized_count is not None
+        and isinstance(fps_num, int)
+        and fps_num > 0
+        and isinstance(fps_den, int)
+        and fps_den > 0
+    ):
+        return normalized_count, 1_000_000.0 * fps_den / fps_num
+
+    raw_source = blueprint.get("source_video")
+    source: dict[str, Any] = raw_source if isinstance(raw_source, dict) else {}
+    source_count = source.get("source_frame_count")
+    duration_us = source.get("duration_us")
+    if isinstance(source_count, int) and source_count > 0:
+        if isinstance(duration_us, int) and duration_us > 0 and source_count > 1:
+            return source_count, duration_us / (source_count - 1)
+        return source_count, None
+    return None, None
+
+
+def _shot_id_for_frame(blueprint: dict[str, Any], frame_idx: int) -> str | None:
+    for shot in blueprint.get("shots", []):
+        if not isinstance(shot, dict):
+            continue
+        frame_start = shot.get("frame_start")
+        frame_end = shot.get("frame_end")
+        shot_id = shot.get("shot_id")
+        if (
+            isinstance(frame_start, int)
+            and isinstance(frame_end, int)
+            and frame_start <= frame_idx <= frame_end
+            and isinstance(shot_id, str)
+        ):
+            return shot_id
+    return None
+
+
+def _supplement_review_frames(
+    selected: dict[int, ReviewFrame],
+    *,
+    blueprint: dict[str, Any],
+    frame_count: int,
+    frame_duration_us: float | None,
+    max_frames: int,
+) -> None:
+    """Fill review coverage with deterministic farthest-point timeline samples."""
+    if frame_count <= 0 or len(selected) >= max_frames:
+        return
+
+    if not selected:
+        initial = sorted({0, max(0, (frame_count - 1) // 2), frame_count - 1})
+        for frame_idx in initial:
+            time_us = round(frame_idx * frame_duration_us) if frame_duration_us is not None else None
+            selected[frame_idx] = ReviewFrame(
+                frame_idx=frame_idx,
+                time_us=time_us,
+                shot_id=_shot_id_for_frame(blueprint, frame_idx),
+                kind="timeline_sample",
+            )
+            if len(selected) >= max_frames:
+                return
+
+    available = [frame_idx for frame_idx in range(frame_count) if frame_idx not in selected]
+    while available and len(selected) < max_frames:
+        existing = tuple(selected)
+        best_frame = max(
+            available,
+            key=lambda frame_idx: (
+                min(abs(frame_idx - existing_idx) for existing_idx in existing),
+                -frame_idx,
+            ),
+        )
+        time_us = round(best_frame * frame_duration_us) if frame_duration_us is not None else None
+        selected[best_frame] = ReviewFrame(
+            frame_idx=best_frame,
+            time_us=time_us,
+            shot_id=_shot_id_for_frame(blueprint, best_frame),
+            kind="timeline_sample",
+        )
+        available.remove(best_frame)
 
 
 def select_review_frames(blueprint: dict[str, Any], *, max_frames: int = 12) -> list[ReviewFrame]:
@@ -75,47 +199,37 @@ def select_review_frames(blueprint: dict[str, Any], *, max_frames: int = 12) -> 
                 ReviewFrame(frame_idx=frame_idx, time_us=time_us, shot_id=shot_id, kind=kind),
             )
 
-    if not selected:
-        raw_timebase = blueprint.get("timebase")
-        timebase: dict[str, Any] = raw_timebase if isinstance(raw_timebase, dict) else {}
-        frame_count = timebase.get("frame_count")
-        frame_duration_us = timebase.get("frame_duration_us")
+    frame_count, frame_duration_us = _timebase_values(blueprint)
+    if frame_count is not None:
+        selected = {
+            frame_idx: review_frame
+            for frame_idx, review_frame in selected.items()
+            if 0 <= frame_idx < frame_count
+        }
 
-        if not isinstance(frame_count, int) or frame_count <= 0:
-            raw_source = blueprint.get("source_video")
-            source: dict[str, Any] = raw_source if isinstance(raw_source, dict) else {}
-            frame_count = source.get("source_frame_count")
-            duration_us = source.get("duration_us")
-            if isinstance(frame_count, int) and frame_count > 1 and isinstance(duration_us, int):
-                frame_duration_us = duration_us / (frame_count - 1)
+    if len(selected) > max_frames:
+        rows = [selected[idx] for idx in sorted(selected)]
+        positions = np.linspace(0, len(rows) - 1, num=max_frames)
+        indices = sorted({round(float(position)) for position in positions})
+        if len(indices) < max_frames:
+            for idx in range(len(rows)):
+                if idx not in indices:
+                    indices.append(idx)
+                    if len(indices) == max_frames:
+                        break
+            indices.sort()
+        return [rows[idx] for idx in indices[:max_frames]]
 
-        if isinstance(frame_count, int) and frame_count > 0:
-            fallback = sorted({0, max(0, (frame_count - 1) // 2), frame_count - 1})
-            for frame_idx in fallback:
-                time_us = None
-                if isinstance(frame_duration_us, (int, float)):
-                    time_us = round(float(frame_duration_us) * frame_idx)
-                selected[frame_idx] = ReviewFrame(
-                    frame_idx=frame_idx,
-                    time_us=time_us,
-                    shot_id=None,
-                    kind="fallback",
-                )
+    if frame_count is not None:
+        _supplement_review_frames(
+            selected,
+            blueprint=blueprint,
+            frame_count=frame_count,
+            frame_duration_us=frame_duration_us,
+            max_frames=max_frames,
+        )
 
-    rows = [selected[idx] for idx in sorted(selected)]
-    if len(rows) <= max_frames:
-        return rows
-
-    positions = np.linspace(0, len(rows) - 1, num=max_frames)
-    indices = sorted({round(float(position)) for position in positions})
-    if len(indices) < max_frames:
-        for idx in range(len(rows)):
-            if idx not in indices:
-                indices.append(idx)
-                if len(indices) == max_frames:
-                    break
-        indices.sort()
-    return [rows[idx] for idx in indices[:max_frames]]
+    return [selected[idx] for idx in sorted(selected)]
 
 
 def _npz_array(archive: zipfile.ZipFile, ref: dict[str, Any] | None) -> np.ndarray | None:
@@ -186,6 +300,32 @@ def _normalized_analysis_media(archive: zipfile.ZipFile) -> tuple[str, bytes, st
     return uri, payload, actual_sha256
 
 
+def _frame_array(series: Any, frame_idx: int) -> np.ndarray | None:
+    if not isinstance(series, np.ndarray) or frame_idx >= len(series):
+        return None
+    return np.asarray(series[frame_idx])
+
+
+def _finite_bbox(value: np.ndarray | None) -> bool:
+    return value is not None and value.shape == (4,) and bool(np.isfinite(value).all())
+
+
+def _finite_landmarks(value: np.ndarray | None, expected_count: int) -> bool:
+    return (
+        value is not None
+        and value.shape == (expected_count, 2)
+        and bool(np.isfinite(value).all())
+    )
+
+
+def _draw_bbox(frame: np.ndarray, bbox: np.ndarray | None, *, thickness: int = 1) -> None:
+    if not _finite_bbox(bbox):
+        return
+    assert bbox is not None
+    x1, y1, x2, y2 = (round(float(value)) for value in bbox)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), thickness)
+
+
 def _draw_character_evidence(
     frame: np.ndarray,
     *,
@@ -195,7 +335,8 @@ def _draw_character_evidence(
     confidence: np.ndarray | None,
     confidence_threshold: float,
 ) -> None:
-    if bbox is not None and bbox.shape == (4,) and np.isfinite(bbox).all():
+    if _finite_bbox(bbox):
+        assert bbox is not None
         x1, y1, x2, y2 = (round(float(value)) for value in bbox)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 2)
         cv2.putText(
@@ -243,6 +384,61 @@ def _draw_character_evidence(
             -1,
             cv2.LINE_AA,
         )
+
+
+def _draw_face_evidence(
+    frame: np.ndarray,
+    *,
+    bbox: np.ndarray | None,
+    landmarks: np.ndarray | None,
+) -> bool:
+    if not _finite_landmarks(landmarks, 478):
+        return False
+    _draw_bbox(frame, bbox)
+    assert landmarks is not None
+    for point in landmarks[::_FACE_POINT_STRIDE]:
+        cv2.circle(
+            frame,
+            (round(float(point[0])), round(float(point[1]))),
+            1,
+            (255, 255, 255),
+            -1,
+            cv2.LINE_AA,
+        )
+    return True
+
+
+def _draw_hand_evidence(
+    frame: np.ndarray,
+    *,
+    bbox: np.ndarray | None,
+    landmarks: np.ndarray | None,
+) -> bool:
+    if not _finite_landmarks(landmarks, 21):
+        return False
+    _draw_bbox(frame, bbox)
+    assert landmarks is not None
+    for first, second in HAND_EDGES:
+        p1 = landmarks[first]
+        p2 = landmarks[second]
+        cv2.line(
+            frame,
+            (round(float(p1[0])), round(float(p1[1]))),
+            (round(float(p2[0])), round(float(p2[1]))),
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+    for point in landmarks:
+        cv2.circle(
+            frame,
+            (round(float(point[0])), round(float(point[1]))),
+            2,
+            (255, 255, 255),
+            -1,
+            cv2.LINE_AA,
+        )
+    return True
 
 
 def _fit_height(image: np.ndarray, target_height: int) -> np.ndarray:
@@ -297,12 +493,32 @@ def build_review_pack(
             pose: dict[str, Any] = raw_pose if isinstance(raw_pose, dict) else {}
             keypoints = _npz_array(archive, pose.get("keypoints_2d_ref"))
             confidence = _npz_array(archive, pose.get("confidence_ref"))
+
+            raw_face = character.get("face")
+            face: dict[str, Any] = raw_face if isinstance(raw_face, dict) else {}
+            face_landmarks = _npz_array(archive, face.get("landmarks_2d_ref"))
+            face_bbox = _npz_array(archive, face.get("bbox_ref"))
+
+            raw_hands = character.get("hands")
+            hands: dict[str, Any] = raw_hands if isinstance(raw_hands, dict) else {}
+            hand_payloads: dict[str, dict[str, np.ndarray | None]] = {}
+            for side in ("left", "right"):
+                raw_hand = hands.get(side)
+                hand: dict[str, Any] = raw_hand if isinstance(raw_hand, dict) else {}
+                hand_payloads[side] = {
+                    "landmarks": _npz_array(archive, hand.get("landmarks_2d_ref")),
+                    "bbox": _npz_array(archive, hand.get("bbox_ref")),
+                }
+
             character_payloads.append(
                 {
                     "character_id": character_id,
                     "bbox": bbox,
                     "keypoints": keypoints,
                     "confidence": confidence,
+                    "face_landmarks": face_landmarks,
+                    "face_bbox": face_bbox,
+                    "hands": hand_payloads,
                 }
             )
 
@@ -334,36 +550,45 @@ def build_review_pack(
 
                 evidence_frame = analysis_frame.copy()
                 visible_characters: list[str] = []
+                detail_presence = {"face": False, "left_hand": False, "right_hand": False}
                 for payload in character_payloads:
                     frame_idx = review_frame.frame_idx
-                    bbox_series = payload["bbox"]
-                    keypoint_series = payload["keypoints"]
-                    confidence_series = payload["confidence"]
-                    bbox = (
-                        bbox_series[frame_idx]
-                        if isinstance(bbox_series, np.ndarray) and frame_idx < len(bbox_series)
-                        else None
-                    )
-                    keypoints = (
-                        keypoint_series[frame_idx]
-                        if isinstance(keypoint_series, np.ndarray) and frame_idx < len(keypoint_series)
-                        else None
-                    )
-                    confidence = (
-                        confidence_series[frame_idx]
-                        if isinstance(confidence_series, np.ndarray) and frame_idx < len(confidence_series)
-                        else None
-                    )
-                    if bbox is not None and np.asarray(bbox).shape == (4,) and np.isfinite(bbox).all():
-                        visible_characters.append(payload["character_id"])
+                    bbox = _frame_array(payload["bbox"], frame_idx)
+                    keypoints = _frame_array(payload["keypoints"], frame_idx)
+                    confidence = _frame_array(payload["confidence"], frame_idx)
+                    if _finite_bbox(bbox):
+                        visible_characters.append(str(payload["character_id"]))
                     _draw_character_evidence(
                         evidence_frame,
-                        character_id=payload["character_id"],
-                        bbox=np.asarray(bbox) if bbox is not None else None,
-                        keypoints=np.asarray(keypoints) if keypoints is not None else None,
-                        confidence=np.asarray(confidence) if confidence is not None else None,
+                        character_id=str(payload["character_id"]),
+                        bbox=bbox,
+                        keypoints=keypoints,
+                        confidence=confidence,
                         confidence_threshold=confidence_threshold,
                     )
+
+                    face_landmarks = _frame_array(payload["face_landmarks"], frame_idx)
+                    face_bbox = _frame_array(payload["face_bbox"], frame_idx)
+                    detail_presence["face"] = _draw_face_evidence(
+                        evidence_frame,
+                        bbox=face_bbox,
+                        landmarks=face_landmarks,
+                    ) or detail_presence["face"]
+
+                    hand_payloads = payload["hands"]
+                    if isinstance(hand_payloads, dict):
+                        for side in ("left", "right"):
+                            hand_payload = hand_payloads.get(side)
+                            if not isinstance(hand_payload, dict):
+                                continue
+                            hand_landmarks = _frame_array(hand_payload.get("landmarks"), frame_idx)
+                            hand_bbox = _frame_array(hand_payload.get("bbox"), frame_idx)
+                            key = f"{side}_hand"
+                            detail_presence[key] = _draw_hand_evidence(
+                                evidence_frame,
+                                bbox=hand_bbox,
+                                landmarks=hand_landmarks,
+                            ) or detail_presence[key]
 
                 label = (
                     f"analysis_frame={review_frame.frame_idx} "
@@ -395,6 +620,7 @@ def build_review_pack(
                         "shot_id": review_frame.shot_id,
                         "kind": review_frame.kind,
                         "visible_character_ids": visible_characters,
+                        "detail_presence": detail_presence,
                         "comparison_image": output_name,
                         "comparison_sha256": sha256_file(output_path),
                     }
@@ -409,6 +635,10 @@ def build_review_pack(
     quality: dict[str, Any] = raw_quality if isinstance(raw_quality, dict) else {}
     raw_timebase = blueprint.get("timebase")
     timebase: dict[str, Any] = raw_timebase if isinstance(raw_timebase, dict) else {}
+    review_frame_detail_counts = {
+        key: sum(1 for row in frame_rows if row["detail_presence"][key])
+        for key in ("face", "left_hand", "right_hand")
+    }
     manifest: dict[str, Any] = {
         "status": "review_pack_ready",
         "manual_verdict_required": True,
@@ -432,10 +662,12 @@ def build_review_pack(
         "character_count": len(blueprint.get("characters", [])),
         "shot_count": len(blueprint.get("shots", [])),
         "module_scores": quality.get("module_scores", {}),
+        "review_frame_detail_counts": review_frame_detail_counts,
         "review_frames": frame_rows,
         "review_instructions": [
             "Compare the left normalized analysis frame with the right evidence overlay from the same frame index.",
-            "Reject incorrect person boxes, pose geometry, missed people, duplicated tracks, or evidence attached to the wrong subject.",
+            "Reject incorrect person boxes, pose geometry, face landmarks, hand landmarks, missed people, duplicated tracks, or evidence attached to the wrong subject.",
+            "Face and hand evidence is drawn only when measured landmarks exist; missing geometry is not interpolated or synthesized.",
             "The raw source SHA is verified separately; evidence overlays must be reviewed on the normalized analysis timeline used by the pipeline.",
             "A green machine gate is not a perceptual acceptance result; record a manual verdict separately.",
         ],
