@@ -1,0 +1,134 @@
+name: E5 Camera Motion Certification
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - "packages/pipeline_core/camera_motion.py"
+      - "packages/pipeline_core/e5_media_pipeline.py"
+      - "packages/blueprint_schema/camera_contract.py"
+      - "packages/blueprint_schema/composite_validator.py"
+      - "packages/blueprint_schema/__init__.py"
+      - "scripts/certify_camera_motion_e5.py"
+      - "scripts/run_pipeline_job.py"
+      - "tests/unit/test_e5_camera_motion.py"
+      - "tests/unit/test_e5_camera_contract.py"
+      - "tests/integration/test_e5_camera_motion.py"
+      - ".github/workflows/e5-camera-motion-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  camera-motion-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg and certified E2/E4 runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install "numpy==1.26.4" "opencv-python==4.10.0.84"
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.1.0 torchvision==0.16.0
+          pip install "mmengine>=0.7.1,<1.0.0"
+          pip install "mmcv==2.1.0" -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html
+          pip install "mmdet==3.3.0"
+          pip install "pydantic>=2.0.0" "jsonschema>=4.18.0" "scenedetect>=0.6.7,<0.7"
+          pip install -e . --no-deps
+
+      - name: Resolve fixed OpenMMLab configs
+        run: |
+          mkdir -p .cert
+          python - <<'PY'
+          import pathlib, mmdet
+          root = pathlib.Path(mmdet.__file__).resolve().parent / '.mim' / 'configs' / 'rtmdet'
+          detector = root / 'rtmdet_tiny_8xb32-300e_coco.py'
+          mask = root / 'rtmdet-ins_tiny_8xb32-300e_coco.py'
+          for path in (detector, mask):
+              if not path.is_file():
+                  raise SystemExit(f'config not found: {path}')
+          pathlib.Path('.cert/det_config.txt').write_text(str(detector), encoding='utf-8')
+          pathlib.Path('.cert/mask_config.txt').write_text(str(mask), encoding='utf-8')
+          PY
+
+      - name: Download and verify certified E2/E4.1 checkpoints
+        run: |
+          set -euo pipefail
+          DET_SHA=78e30dcce0c6f594eaff0d6977b84b4103688b4aff0ad1aa16008a8cc854a7fb
+          MASK_SHA=ec670f7ee9e20bd7931e15f15b7016f7fe531baaab81f2e6153382d046111885
+          curl --fail --location --retry 3 -o .cert/rtmdet_tiny.pth \
+            https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_tiny_8xb32-300e_coco/rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth
+          curl --fail --location --retry 3 -o .cert/rtmdet_ins_tiny.pth \
+            https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth
+          sha256sum .cert/rtmdet_tiny.pth | tee .cert/detector.sha256
+          sha256sum .cert/rtmdet_ins_tiny.pth | tee .cert/mask.sha256
+          test "$(cut -d' ' -f1 .cert/detector.sha256)" = "$DET_SHA"
+          test "$(cut -d' ' -f1 .cert/mask.sha256)" = "$MASK_SHA"
+
+      - name: Build deterministic translated real-human video
+        run: |
+          curl --fail --location --retry 3 -o .cert/person.jpg \
+            https://raw.githubusercontent.com/open-mmlab/mmpose/main/tests/data/coco/000000197388.jpg
+          python - <<'PY'
+          import pathlib
+          import cv2
+          import numpy as np
+          image = cv2.imread('.cert/person.jpg')
+          if image is None:
+              raise SystemExit('could not decode official human sample')
+          height, width = image.shape[:2]
+          # Add deterministic low-contrast background corners without hiding the real person.
+          textured = image.copy()
+          for y in range(12, height, 24):
+              for x in range(12, width, 24):
+                  cv2.circle(textured, (x, y), 1, (180, 180, 180), -1)
+          out = pathlib.Path('.cert/frames')
+          out.mkdir(parents=True, exist_ok=True)
+          for idx in range(8):
+              matrix = np.asarray([[1.0, 0.0, idx * 1.0], [0.0, 1.0, idx * 0.5]], dtype=np.float32)
+              frame = cv2.warpAffine(textured, matrix, (width, height), borderMode=cv2.BORDER_REPLICATE)
+              if not cv2.imwrite(str(out / f'{idx:03d}.png'), frame):
+                  raise SystemExit('failed to write certification frame')
+          PY
+          ffmpeg -hide_banner -loglevel error -framerate 4 -i .cert/frames/%03d.png \
+            -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -c:v libx264 -pix_fmt yuv420p \
+            -movflags +faststart .cert/camera_motion_smoke.mp4
+
+      - name: Run E2-to-E5 end-to-end certification
+        run: |
+          python scripts/certify_camera_motion_e5.py \
+            --video .cert/camera_motion_smoke.mp4 \
+            --det-config "$(cat .cert/det_config.txt)" \
+            --det-checkpoint .cert/rtmdet_tiny.pth \
+            --mask-config "$(cat .cert/mask_config.txt)" \
+            --mask-checkpoint .cert/rtmdet_ins_tiny.pth \
+            --expected-tx 1.0 \
+            --expected-ty 0.5 \
+            --output .cert/e5_camera_motion_certification.json
+
+      - name: Show certification evidence
+        if: always()
+        run: |
+          cat .cert/detector.sha256 || true
+          cat .cert/mask.sha256 || true
+          cat .cert/e5_camera_motion_certification.json || true
+
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e5-camera-motion-certification
+          path: |
+            .cert/detector.sha256
+            .cert/mask.sha256
+            .cert/e5_camera_motion_certification.json
+          if-no-files-found: warn
