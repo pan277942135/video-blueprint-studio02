@@ -187,6 +187,23 @@ def main() -> int:
     if not decoded_background_pixels:
         raise SystemExit("E9 did not emit any decodable background mask")
 
+    reports = blueprint.get("artifacts", {}).get("reports", [])
+    report_ref = next(
+        (report for report in reports if isinstance(report, dict) and report.get("kind") == "environment_photometry"),
+        None,
+    )
+    if not isinstance(report_ref, dict):
+        raise SystemExit("E9 environment report ref missing")
+    report_path_value = sidecars.get(report_ref.get("uri"))
+    if not isinstance(report_path_value, (str, os.PathLike)):
+        raise SystemExit("E9 physical environment report missing")
+    report_path = pathlib.Path(report_path_value)
+    if not report_path.is_file() or _sha256(report_path) != report_ref.get("sha256"):
+        raise SystemExit("E9 physical environment report checksum mismatch")
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    if report_payload.get("algorithm") != extension.get("algorithm"):
+        raise SystemExit("E9 physical report algorithm drifted from manifest extension")
+
     provenance = next((tool for tool in blueprint["provenance"]["tools"] if tool.get("module") == "environment"), None)
     if not provenance or provenance.get("weights_sha256") is not None:
         raise SystemExit("E9 provenance must exist and introduce no model weights")
