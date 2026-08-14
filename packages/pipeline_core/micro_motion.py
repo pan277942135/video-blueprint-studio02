@@ -250,13 +250,15 @@ def _acceleration(
     velocity: np.ndarray,
     valid: np.ndarray,
     shot_ranges: list[tuple[int, int]],
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     result = np.full_like(velocity, np.nan, dtype=np.float32)
+    result_valid = np.zeros_like(valid, dtype=np.bool_)
     for frame_start, frame_end in shot_ranges:
         for frame_idx in range(frame_start + 1, frame_end + 1):
             if valid[frame_idx] and valid[frame_idx - 1]:
                 result[frame_idx] = float(velocity[frame_idx] - velocity[frame_idx - 1])
-    return result
+                result_valid[frame_idx] = True
+    return result, result_valid
 
 
 def analyze_frequency(
@@ -545,7 +547,7 @@ def run_micro_motion(
         displacement, displacement_valid = _integrate(velocity, signal_valid, shot_ranges)
         vertical_displacement, vertical_valid = _integrate(vertical_velocity, signal_valid, shot_ranges)
         detrended = _linear_detrend(displacement, displacement_valid, shot_ranges)
-        acceleration = _acceleration(velocity, signal_valid, shot_ranges)
+        acceleration, acceleration_valid = _acceleration(velocity, signal_valid, shot_ranges)
 
         dominant_frequency, phase, periodicity, cycles_observed, window_frames = analyze_frequency(
             detrended,
@@ -634,6 +636,7 @@ def run_micro_motion(
             velocity=velocity,
             velocity_valid=signal_valid,
             acceleration=acceleration,
+            acceleration_valid=acceleration_valid,
         )
         checksum = sha256_file(path)
         source_surface_uri = str(residual_ref["uri"])
@@ -687,7 +690,7 @@ def run_micro_motion(
             checksum=checksum,
             frame_count=frame_count,
             array_key="acceleration",
-            valid_key="velocity_valid",
+            valid_key="acceleration_valid",
             unit="body_local_unit_per_frame2",
             config=config,
             source_surface_uri=source_surface_uri,
