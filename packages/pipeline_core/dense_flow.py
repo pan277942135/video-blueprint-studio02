@@ -81,10 +81,11 @@ def farneback_step(previous_gray: np.ndarray, gray: np.ndarray, config: DenseFlo
     config.validate()
     if previous_gray.ndim != 2 or gray.ndim != 2 or previous_gray.shape != gray.shape:
         raise DenseFlowError("Farneback input frames must be equal-size grayscale images")
+    initial_flow = np.zeros((*gray.shape, 2), dtype=np.float32)
     flow = cv2.calcOpticalFlowFarneback(
         previous_gray,
         gray,
-        None,
+        initial_flow,
         config.pyr_scale,
         config.levels,
         config.winsize,
