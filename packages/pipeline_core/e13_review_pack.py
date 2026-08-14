@@ -55,22 +55,26 @@ def select_review_frames(blueprint: dict[str, Any], *, max_frames: int = 12) -> 
     for shot in blueprint.get("shots", []):
         if not isinstance(shot, dict):
             continue
-        shot_id = shot.get("shot_id") if isinstance(shot.get("shot_id"), str) else None
+        raw_shot_id = shot.get("shot_id")
+        shot_id = raw_shot_id if isinstance(raw_shot_id, str) else None
         for keyframe in shot.get("keyframes", []):
             if not isinstance(keyframe, dict):
                 continue
             frame_idx = keyframe.get("frame_idx")
             if not isinstance(frame_idx, int) or frame_idx < 0:
                 continue
-            time_us = keyframe.get("time_us") if isinstance(keyframe.get("time_us"), int) else None
-            kind = keyframe.get("kind") if isinstance(keyframe.get("kind"), str) else "keyframe"
+            raw_time_us = keyframe.get("time_us")
+            time_us = raw_time_us if isinstance(raw_time_us, int) else None
+            raw_kind = keyframe.get("kind")
+            kind = raw_kind if isinstance(raw_kind, str) else "keyframe"
             selected.setdefault(
                 frame_idx,
                 ReviewFrame(frame_idx=frame_idx, time_us=time_us, shot_id=shot_id, kind=kind),
             )
 
     if not selected:
-        source = blueprint.get("source_video") if isinstance(blueprint.get("source_video"), dict) else {}
+        raw_source = blueprint.get("source_video")
+        source: dict[str, Any] = raw_source if isinstance(raw_source, dict) else {}
         frame_count = source.get("source_frame_count")
         duration_us = source.get("duration_us")
         if isinstance(frame_count, int) and frame_count > 0:
@@ -210,7 +214,8 @@ def build_review_pack(
 
     with zipfile.ZipFile(bundle_path, "r") as archive:
         blueprint = json.loads(archive.read("blueprint.json"))
-        source = blueprint.get("source_video") if isinstance(blueprint.get("source_video"), dict) else {}
+        raw_source = blueprint.get("source_video")
+        source: dict[str, Any] = raw_source if isinstance(raw_source, dict) else {}
         expected_source_sha256 = source.get("sha256")
         if expected_source_sha256 != video_sha256:
             raise RuntimeError(
@@ -227,7 +232,8 @@ def build_review_pack(
             if not isinstance(character_id, str):
                 continue
             bbox = _npz_array(archive, character.get("bbox_ref"))
-            pose = character.get("pose") if isinstance(character.get("pose"), dict) else {}
+            raw_pose = character.get("pose")
+            pose: dict[str, Any] = raw_pose if isinstance(raw_pose, dict) else {}
             keypoints = _npz_array(archive, pose.get("keypoints_2d_ref"))
             confidence = _npz_array(archive, pose.get("confidence_ref"))
             character_payloads.append(
@@ -321,7 +327,8 @@ def build_review_pack(
         finally:
             capture.release()
 
-    quality = blueprint.get("quality") if isinstance(blueprint.get("quality"), dict) else {}
+    raw_quality = blueprint.get("quality")
+    quality: dict[str, Any] = raw_quality if isinstance(raw_quality, dict) else {}
     manifest: dict[str, Any] = {
         "status": "review_pack_ready",
         "manual_verdict_required": True,
