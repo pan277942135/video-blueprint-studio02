@@ -26,6 +26,9 @@ APPROVED_MEDIAPIPE_VERSION = "0.10.35"
 FACE_ROI_POLICY = "adaptive_upper_body_v1"
 FACE_ROI_MIN_HEIGHT_RATIO = 0.35
 FACE_ROI_WIDTH_TO_HEIGHT = 1.25
+HAND_ROI_POLICY = "adaptive_upper_body_v1"
+HAND_ROI_MIN_HEIGHT_RATIO = 0.72
+HAND_ROI_WIDTH_TO_HEIGHT = 2.0
 
 
 class MediaPipeFaceHandConfigurationError(RuntimeError):
@@ -84,6 +87,7 @@ def _config_hash(config: MediaPipeFaceHandConfig, face_sha256: str, hand_sha256:
             f"fps:{config.fps_num}/{config.fps_den}",
             f"padding:{config.crop_padding_ratio}",
             f"face-roi:{FACE_ROI_POLICY}:{FACE_ROI_MIN_HEIGHT_RATIO}:{FACE_ROI_WIDTH_TO_HEIGHT}",
+            f"hand-roi:{HAND_ROI_POLICY}:{HAND_ROI_MIN_HEIGHT_RATIO}:{HAND_ROI_WIDTH_TO_HEIGHT}",
             f"face-thresholds:{config.min_face_detection_confidence}:{config.min_face_presence_confidence}:{config.min_face_tracking_confidence}",
             f"hand-thresholds:{config.min_hand_detection_confidence}:{config.min_hand_presence_confidence}:{config.min_hand_tracking_confidence}",
         ]
@@ -108,21 +112,27 @@ def _validate_config(config: MediaPipeFaceHandConfig) -> None:
             raise MediaPipeFaceHandConfigurationError(f"{label} must be within [0, 1]")
 
 
+def _validated_person_bbox(
+    bbox_xyxy: tuple[float, float, float, float],
+    *,
+    purpose: str,
+) -> tuple[float, float, float, float, float, float]:
+    x1, y1, x2, y2 = (float(value) for value in bbox_xyxy)
+    if not all(np.isfinite([x1, y1, x2, y2])) or x2 <= x1 or y2 <= y1:
+        raise MediaPipeFaceHandConfigurationError(
+            f"Anonymous person bbox is invalid for {purpose} ROI selection"
+        )
+    return x1, y1, x2, y2, x2 - x1, y2 - y1
+
+
 def _face_search_bbox(
     bbox_xyxy: tuple[float, float, float, float],
 ) -> tuple[float, float, float, float]:
-    """Return an adaptive upper-body search ROI for FaceLandmarker.
-
-    Near-square / portrait crops keep the complete person box. Tall full-body
-    boxes retain their full width but shorten the vertical search region so a
-    small face occupies more FaceLandmarker input pixels. This changes only the
-    search ROI; model artifacts and confidence thresholds remain unchanged.
-    """
-    x1, y1, x2, y2 = (float(value) for value in bbox_xyxy)
-    if not all(np.isfinite([x1, y1, x2, y2])) or x2 <= x1 or y2 <= y1:
-        raise MediaPipeFaceHandConfigurationError("Anonymous person bbox is invalid for face ROI selection")
-    width = x2 - x1
-    height = y2 - y1
+    """Return an adaptive upper-body search ROI for FaceLandmarker."""
+    x1, y1, x2, _, width, height = _validated_person_bbox(
+        bbox_xyxy,
+        purpose="face",
+    )
     face_search_height = min(
         height,
         max(
@@ -131,6 +141,31 @@ def _face_search_bbox(
         ),
     )
     return x1, y1, x2, y1 + face_search_height
+
+
+def _hand_search_bbox(
+    bbox_xyxy: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Return an adaptive upper-body-and-arms search ROI for HandLandmarker.
+
+    The complete person width is preserved so extended arms stay available. Only
+    the lower part of a clearly tall full-body box is removed, making hands
+    materially larger at model input resolution while retaining head, torso,
+    shoulders, arms, hips, and typical hanging-hand positions. Near-square or
+    close person boxes naturally keep the complete ROI.
+    """
+    x1, y1, x2, _, width, height = _validated_person_bbox(
+        bbox_xyxy,
+        purpose="hand",
+    )
+    hand_search_height = min(
+        height,
+        max(
+            height * HAND_ROI_MIN_HEIGHT_RATIO,
+            width * HAND_ROI_WIDTH_TO_HEIGHT,
+        ),
+    )
+    return x1, y1, x2, y1 + hand_search_height
 
 
 def _clip_crop(
@@ -215,8 +250,8 @@ class MediaPipeFaceHandRefiner:
 
     One VIDEO-mode task pair is maintained per anonymous character track so
     MediaPipe sees strictly increasing timestamps even when multiple people are
-    processed in the same source frame. FaceLandmarker receives an adaptive
-    upper-body search ROI while HandLandmarker keeps the complete person ROI.
+    processed in the same source frame. FaceLandmarker receives a compact face
+    search ROI and HandLandmarker receives a broader adaptive upper-body/arms ROI.
     No identity, embedding, blendshape, transformation-matrix, world-landmark,
     or sensitive-attribute output is requested or exported.
     """
@@ -348,6 +383,7 @@ class MediaPipeFaceHandRefiner:
             raise MediaPipeFaceHandConfigurationError("MediaPipe E3.2 expects BGR uint8 video frames")
 
         face_bbox = _face_search_bbox(bbox_xyxy)
+        hand_bbox = _hand_search_bbox(bbox_xyxy)
         face_crop, face_offset_x, face_offset_y = _clip_crop(
             frame,
             face_bbox,
@@ -355,7 +391,7 @@ class MediaPipeFaceHandRefiner:
         )
         hand_crop, hand_offset_x, hand_offset_y = _clip_crop(
             frame,
-            bbox_xyxy,
+            hand_bbox,
             self.config.crop_padding_ratio,
         )
         face_rgb = np.ascontiguousarray(cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB))
