@@ -110,6 +110,16 @@ def test_legacy_source_fallback_remains_readable() -> None:
     assert report["source"]["sha256"] == "b" * 64
 
 
+def test_canonical_source_video_wins_over_legacy_source() -> None:
+    blueprint = _base_blueprint()
+    blueprint["source"] = {"file_name": "stale-legacy.mp4", "sha256": "b" * 64}
+
+    report = summarize_blueprint_acceptance(blueprint, integrity={"valid": True, "warnings": []})
+
+    assert report["source"]["file_name"] == "real.mp4"
+    assert report["source"]["sha256"] == "a" * 64
+
+
 def test_succeeded_stage_with_zero_quality_is_not_treated_as_accurate() -> None:
     blueprint = _base_blueprint()
     blueprint["quality"]["module_scores"]["surface_motion"] = 0.0
