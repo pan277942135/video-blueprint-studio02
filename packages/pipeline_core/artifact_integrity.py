@@ -221,11 +221,11 @@ def validate_blueprint_artifacts(
     warnings: list[str] = []
     referenced, hash_refs = _artifact_uri_occurrences(blueprint)
 
-    for uri in sorted(referenced):
-        if not _safe_artifact_uri(uri):
-            errors.append(f"unsafe artifact URI: {uri!r}")
-        if uri not in sidecars:
-            errors.append(f"referenced artifact is missing from sidecars: {uri}")
+    for referenced_uri in sorted(referenced):
+        if not _safe_artifact_uri(referenced_uri):
+            errors.append(f"unsafe artifact URI: {referenced_uri!r}")
+        if referenced_uri not in sidecars:
+            errors.append(f"referenced artifact is missing from sidecars: {referenced_uri}")
 
     try:
         resolved = resolve_sidecar_bytes(blueprint, sidecars)
