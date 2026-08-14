@@ -272,9 +272,12 @@ def _validate_e4_dense_flow_extension(
         errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.shape must be [frame, grid_y, grid_x, 2].")
     elif isinstance(frame_count, int) and shape[0] != frame_count:
         errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.shape[0] must equal frame_count.")
-    if isinstance(frame_count, int) and frame_count > 0:
-        if ref.get("frame_start") != 0 or ref.get("frame_end") != frame_count - 1:
-            errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path} must cover the full timeline.")
+    if (
+        isinstance(frame_count, int)
+        and frame_count > 0
+        and (ref.get("frame_start") != 0 or ref.get("frame_end") != frame_count - 1)
+    ):
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path} must cover the full timeline.")
     if not _is_sha256(ref.get("checksum_sha256")):
         errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.checksum_sha256 must be SHA256 hex.")
 
@@ -298,9 +301,12 @@ def _validate_e4_dense_flow_extension(
         errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.metadata.source_width must match source_video.width.")
     if isinstance(source_height, int) and metadata.get("source_height") != source_height:
         errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path}.metadata.source_height must match source_video.height.")
-    if isinstance(shape, list) and len(shape) == 4:
-        if metadata.get("grid_height") != shape[1] or metadata.get("grid_width") != shape[2]:
-            errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path} grid metadata must match shape.")
+    if (
+        isinstance(shape, list)
+        and len(shape) == 4
+        and (metadata.get("grid_height") != shape[1] or metadata.get("grid_width") != shape[2])
+    ):
+        errors.append(f"E4.3 Dense Flow Contract Violation: {ref_path} grid metadata must match shape.")
     for key in ("grid_to_source_scale_x", "grid_to_source_scale_y"):
         value = metadata.get(key)
         if not isinstance(value, (int, float)) or value <= 0:
