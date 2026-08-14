@@ -29,17 +29,20 @@ def create_bundle_zip(
     output_zip_path: str,
 ) -> str:
     """Assemble and then re-verify a physical Video Blueprint bundle ZIP."""
+    if os.path.exists(output_zip_path):
+        os.remove(output_zip_path)
+
     try:
         resolved_sidecars = resolve_sidecar_bytes(blueprint_data, sidecars)
-    except OSError as exc:
-        raise ArtifactIntegrityError(str(exc)) from exc
+        preflight = require_blueprint_artifacts(blueprint_data, resolved_sidecars)
+        orphan_warnings = list(preflight.get("warnings", []))
+        if orphan_warnings:
+            raise ArtifactIntegrityError("; ".join(orphan_warnings))
 
-    preflight = require_blueprint_artifacts(blueprint_data, resolved_sidecars)
-    report = dict(validation_report)
-    report["artifact_integrity"] = preflight
-    bundle_manifest_files: list[dict[str, Any]] = []
+        report = dict(validation_report)
+        report["artifact_integrity"] = preflight
+        bundle_manifest_files: list[dict[str, Any]] = []
 
-    try:
         with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
             blueprint_bytes = _json_bytes(blueprint_data)
             zip_file.writestr("blueprint.json", blueprint_bytes)
@@ -81,6 +84,10 @@ def create_bundle_zip(
             zip_file.writestr("bundle_manifest.json", _json_bytes(bundle_manifest))
 
         require_bundle_zip(output_zip_path)
+    except OSError as exc:
+        if os.path.exists(output_zip_path):
+            os.remove(output_zip_path)
+        raise ArtifactIntegrityError(str(exc)) from exc
     except Exception:
         if os.path.exists(output_zip_path):
             os.remove(output_zip_path)
