@@ -4,7 +4,12 @@ import hashlib
 
 import pytest
 
-from packages.pipeline_core.e12_runtime import E12RuntimePaths, _download_verified
+from packages.pipeline_core.e12_runtime import (
+    FACE_TASK_URL,
+    HAND_TASK_URL,
+    E12RuntimePaths,
+    _download_verified,
+)
 
 
 def test_download_verified_reuses_matching_existing_asset(tmp_path):
@@ -36,6 +41,13 @@ def test_download_verified_refuses_mismatched_existing_asset(tmp_path):
         )
 
     assert asset.read_bytes() == b"tampered"
+
+
+def test_mediapipe_runtime_urls_pin_approved_object_generations():
+    assert FACE_TASK_URL.endswith("?generation=1683136941468629")
+    assert HAND_TASK_URL.endswith("?generation=1682480005356399")
+    assert "/latest/" in FACE_TASK_URL
+    assert "/latest/" in HAND_TASK_URL
 
 
 def test_runtime_paths_emit_complete_cli_arguments(tmp_path):
