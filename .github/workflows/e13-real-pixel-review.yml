@@ -6,6 +6,8 @@ on:
     paths:
       - "packages/pipeline_core/person_tracking.py"
       - "packages/pipeline_core/track_confirmation.py"
+      - "packages/pipeline_core/face_hand_refinement.py"
+      - "packages/pipeline_core/mediapipe_face_hand_backend.py"
       - "packages/pipeline_core/e13_review_pack.py"
       - "scripts/build_e13_review_pack.py"
       - "scripts/run_real_video_e12.py"
@@ -46,10 +48,6 @@ jobs:
           }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
           PY
           echo "E13 real sample SHA256: $ACTUAL_SHA256"
-          if [[ "$E13_SAMPLE_SHA256" == "TO_BE_PINNED_AFTER_FIRST_RUN" ]]; then
-            echo "E13 sample identity discovery complete; pin SHA256=$ACTUAL_SHA256 before certification can pass."
-            exit 12
-          fi
           test "$ACTUAL_SHA256" = "$E13_SAMPLE_SHA256"
 
       - uses: actions/setup-python@v5
@@ -87,7 +85,7 @@ jobs:
             --confidence-threshold 0.30 \
             | tee .cert/e13/e13_review_builder.log
 
-      - name: Assert E13 evidence contract and E14 person-track ground truth
+      - name: Assert E13/E14 evidence and E15 face coverage
         if: success()
         run: |
           set -euo pipefail
@@ -102,6 +100,7 @@ jobs:
           review = json.loads(Path('.cert/e13/review/e13_review_manifest.json').read_text())
           with zipfile.ZipFile('.cert/e13/e12-output/bundle.zip') as archive:
               tracking = json.loads(archive.read('artifacts/reports/person_tracking.json'))
+              face_hands = json.loads(archive.read('artifacts/reports/face_hands_refinement.json'))
 
           assert source['sha256'] == review['source']['sha256'], (source, review['source'])
           assert run['status'] == 'completed', run
@@ -114,16 +113,26 @@ jobs:
           assert review['review_frames'], review
           assert review['character_count'] > 0, review
 
-          # The pinned OpenMMLab sample contains one real person. E13 manual review
-          # previously proved the second low-confidence RTMDet track was a wall/ceiling
-          # tracking device. E14 must preserve candidate recall while rejecting that
-          # weak candidate before canonical character export.
+          # E14: preserve low-threshold candidate recall but export only the real person.
           assert tracking['candidate_track_count'] >= 2, tracking
           assert tracking['track_count'] == 1, tracking
           assert tracking['rejected_track_count'] >= 1, tracking
           assert review['character_count'] == tracking['track_count'], (review, tracking)
           assert any(not item['confirmed'] for item in tracking['track_confirmation']), tracking
-          assert all(item.get('confirmed_character_id') is None for item in tracking['track_confirmation'] if not item['confirmed']), tracking
+          assert all(
+              item.get('confirmed_character_id') is None
+              for item in tracking['track_confirmation']
+              if not item['confirmed']
+          ), tracking
+
+          # E15: the person's face is visibly available through a substantial part
+          # of this pinned walking sequence. The legacy whole-person FaceLandmarker
+          # crop detected only 1/100 frames. Require a meaningful recovery while
+          # keeping MediaPipe's approved 0.5 confidence gates unchanged.
+          assert len(face_hands['characters']) == 1, face_hands
+          face_row = face_hands['characters'][0]
+          assert face_row['present_frames'] == 100, face_row
+          assert face_row['face_frames'] >= 20, face_row
 
           for row in review['review_frames']:
               image = Path('.cert/e13/review') / row['comparison_image']
@@ -136,6 +145,9 @@ jobs:
               'confirmed_track_count': tracking['track_count'],
               'rejected_track_count': tracking['rejected_track_count'],
               'track_confirmation': tracking['track_confirmation'],
+              'face_frames': face_row['face_frames'],
+              'left_hand_frames': face_row['left_hand_frames'],
+              'right_hand_frames': face_row['right_hand_frames'],
               'character_count': review['character_count'],
               'shot_count': review['shot_count'],
               'review_frame_count': len(review['review_frames']),
