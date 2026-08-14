@@ -128,6 +128,29 @@ def test_missing_local_sidecar_path_fails_closed_and_never_becomes_zip_text(tmp_
     assert not output.exists()
 
 
+def test_in_memory_report_is_materialized_to_its_declared_legacy_json_hash(tmp_path) -> None:
+    blueprint, sidecars = _fixture()
+    report_uri = "artifacts/reports/legacy_sorted_report.json"
+    report = {"zeta": 1, "alpha": {"value": 2}}
+    expected_bytes = json.dumps(report, indent=2, sort_keys=True).encode("utf-8")
+    blueprint["artifacts"]["reports"].append(
+        {
+            "kind": "legacy_sorted_report",
+            "uri": report_uri,
+            "sha256": _sha(expected_bytes),
+        }
+    )
+    sidecars[report_uri] = report
+
+    result = require_blueprint_artifacts(blueprint, sidecars)
+    assert result["valid"] is True
+
+    output = tmp_path / "legacy-bundle.zip"
+    create_bundle_zip(blueprint, sidecars, {"valid": True, "errors": []}, str(output))
+    with zipfile.ZipFile(output, "r") as archive:
+        assert archive.read(report_uri) == expected_bytes
+
+
 def test_bundle_exporter_reverifies_zip_bytes(tmp_path) -> None:
     blueprint, sidecars = _fixture()
     blueprint["blueprint_id"] = "test-blueprint"
