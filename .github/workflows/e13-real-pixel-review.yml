@@ -4,6 +4,8 @@ on:
   pull_request:
     branches: [ main, master ]
     paths:
+      - "packages/pipeline_core/person_tracking.py"
+      - "packages/pipeline_core/track_confirmation.py"
       - "packages/pipeline_core/e13_review_pack.py"
       - "scripts/build_e13_review_pack.py"
       - "scripts/run_real_video_e12.py"
@@ -85,18 +87,21 @@ jobs:
             --confidence-threshold 0.30 \
             | tee .cert/e13/e13_review_builder.log
 
-      - name: Assert E13 evidence contract
+      - name: Assert E13 evidence contract and E14 person-track ground truth
         if: success()
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
+          import zipfile
           from pathlib import Path
 
           source = json.loads(Path('.cert/e13/source_identity.json').read_text())
           run = json.loads(Path('.cert/e13/e12-output/e12_run_manifest.json').read_text())
           acceptance = json.loads(Path('.cert/e13/e12-output/e12_real_video_acceptance.json').read_text())
           review = json.loads(Path('.cert/e13/review/e13_review_manifest.json').read_text())
+          with zipfile.ZipFile('.cert/e13/e12-output/bundle.zip') as archive:
+              tracking = json.loads(archive.read('artifacts/reports/person_tracking.json'))
 
           assert source['sha256'] == review['source']['sha256'], (source, review['source'])
           assert run['status'] == 'completed', run
@@ -108,6 +113,18 @@ jobs:
           assert review['automatic_perceptual_pass'] is False, review
           assert review['review_frames'], review
           assert review['character_count'] > 0, review
+
+          # The pinned OpenMMLab sample contains one real person. E13 manual review
+          # previously proved the second low-confidence RTMDet track was a wall/ceiling
+          # tracking device. E14 must preserve candidate recall while rejecting that
+          # weak candidate before canonical character export.
+          assert tracking['candidate_track_count'] >= 2, tracking
+          assert tracking['track_count'] == 1, tracking
+          assert tracking['rejected_track_count'] >= 1, tracking
+          assert review['character_count'] == tracking['track_count'], (review, tracking)
+          assert any(not item['confirmed'] for item in tracking['track_confirmation']), tracking
+          assert all(item.get('confirmed_character_id') is None for item in tracking['track_confirmation'] if not item['confirmed']), tracking
+
           for row in review['review_frames']:
               image = Path('.cert/e13/review') / row['comparison_image']
               assert image.is_file() and image.stat().st_size > 0, row
@@ -115,6 +132,10 @@ jobs:
               'source_sha256': source['sha256'],
               'machine_gate': run['machine_gate'],
               'final_acceptance': run['final_acceptance'],
+              'candidate_track_count': tracking['candidate_track_count'],
+              'confirmed_track_count': tracking['track_count'],
+              'rejected_track_count': tracking['rejected_track_count'],
+              'track_confirmation': tracking['track_confirmation'],
               'character_count': review['character_count'],
               'shot_count': review['shot_count'],
               'review_frame_count': len(review['review_frames']),
