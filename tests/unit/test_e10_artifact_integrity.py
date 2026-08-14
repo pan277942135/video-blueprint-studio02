@@ -128,6 +128,27 @@ def test_missing_local_sidecar_path_fails_closed_and_never_becomes_zip_text(tmp_
     assert not output.exists()
 
 
+def test_failed_preflight_removes_stale_bundle_output(tmp_path) -> None:
+    blueprint, sidecars = _fixture()
+    output = tmp_path / "bundle.zip"
+    output.write_bytes(b"stale bundle that must never survive a failed retry")
+    sidecars["artifacts/keyframes/frame.png"] = str(tmp_path / "missing.png")
+
+    with pytest.raises(ArtifactIntegrityError, match="sidecar file path is missing"):
+        create_bundle_zip(blueprint, sidecars, {"valid": True, "errors": []}, str(output))
+    assert not output.exists()
+
+
+def test_bundle_export_rejects_unreferenced_sidecar_artifacts(tmp_path) -> None:
+    blueprint, sidecars = _fixture()
+    sidecars["artifacts/reports/orphan.json"] = b"{}"
+    output = tmp_path / "bundle.zip"
+
+    with pytest.raises(ArtifactIntegrityError, match="unreferenced sidecar artifact"):
+        create_bundle_zip(blueprint, sidecars, {"valid": True, "errors": []}, str(output))
+    assert not output.exists()
+
+
 def test_in_memory_report_is_materialized_to_its_declared_legacy_json_hash(tmp_path) -> None:
     blueprint, sidecars = _fixture()
     report_uri = "artifacts/reports/legacy_sorted_report.json"
