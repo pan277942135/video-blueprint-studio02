@@ -152,11 +152,14 @@ def _validate_npz_ref(
                 else:
                     validity = np.asarray(arrays[valid_key])
                     declared_shape = ref.get("shape")
-                    if isinstance(declared_shape, list) and declared_shape:
-                        if validity.ndim < 1 or validity.shape[0] != declared_shape[0]:
-                            errors.append(
-                                f"{path}: validity array first dimension does not match declared frame dimension"
-                            )
+                    if (
+                        isinstance(declared_shape, list)
+                        and declared_shape
+                        and (validity.ndim < 1 or validity.shape[0] != declared_shape[0])
+                    ):
+                        errors.append(
+                            f"{path}: validity array first dimension does not match declared frame dimension"
+                        )
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         errors.append(f"{path}: NPZ could not be decoded: {exc}")
 
