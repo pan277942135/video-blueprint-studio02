@@ -26,9 +26,69 @@ from packages.pipeline_core.micro_motion import (
 from packages.pipeline_core.sparse_motion import atomic_npz, sha256_file
 
 ALGORITHM = "body_local_sparse_periodicity_v2"
-SELECTION_METHOD = "per_track_frequency_consensus_v1"
+SELECTION_METHOD = "per_track_frequency_locked_consensus_v2"
 TRACK_PERIODICITY_FLOOR = 0.25
-MIN_CONSENSUS_TRACKS = 3
+MIN_CONSENSUS_TRACKS = 4
+
+
+def _longest_valid_indices(valid: np.ndarray, shot_ranges: list[tuple[int, int]]) -> np.ndarray:
+    best = np.asarray([], dtype=np.int64)
+    mask = np.asarray(valid, dtype=np.bool_)
+    for frame_start, frame_end in shot_ranges:
+        start: int | None = None
+        for frame_idx in range(frame_start, frame_end + 1):
+            if bool(mask[frame_idx]):
+                if start is None:
+                    start = frame_idx
+            elif start is not None:
+                candidate = np.arange(start, frame_idx, dtype=np.int64)
+                if len(candidate) > len(best):
+                    best = candidate
+                start = None
+        if start is not None:
+            candidate = np.arange(start, frame_end + 1, dtype=np.int64)
+            if len(candidate) > len(best):
+                best = candidate
+    return best
+
+
+def _spectral_profile(
+    signal: np.ndarray,
+    valid: np.ndarray,
+    *,
+    fps: float,
+    shot_ranges: list[tuple[int, int]],
+    config: MicroMotionConfig,
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    indices = _longest_valid_indices(valid, shot_ranges)
+    duration_s = max(0.0, (len(indices) - 1) / fps) if len(indices) else 0.0
+    resolution = fps / max(len(indices), 1) if len(indices) else 0.0
+    if len(indices) < config.min_periodic_frames:
+        return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), resolution, duration_s
+    values = np.asarray(signal[indices], dtype=np.float64)
+    if not np.all(np.isfinite(values)):
+        return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), resolution, duration_s
+    values -= float(np.mean(values))
+    rms = float(np.sqrt(np.mean(values * values)))
+    if not math.isfinite(rms) or rms < 1e-12:
+        return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), resolution, duration_s
+    spectrum = np.fft.rfft(values * np.hanning(len(values)))
+    frequencies = np.fft.rfftfreq(len(values), d=1.0 / fps)
+    power = np.abs(spectrum) ** 2
+    max_frequency = min(config.max_frequency_hz, fps * 0.45)
+    band = (frequencies >= config.min_frequency_hz) & (frequencies <= max_frequency) & (frequencies > 0.0)
+    band_indices = np.flatnonzero(band)
+    if not len(band_indices):
+        return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), resolution, duration_s
+    band_power = float(np.sum(power[band_indices]))
+    if not math.isfinite(band_power) or band_power <= 1e-18:
+        return frequencies[band_indices].astype(np.float64), np.zeros(len(band_indices), dtype=np.float64), resolution, duration_s
+    return (
+        frequencies[band_indices].astype(np.float64),
+        (power[band_indices] / band_power).astype(np.float64),
+        resolution,
+        duration_s,
+    )
 
 
 def _track_signal(
@@ -70,6 +130,13 @@ def _track_signal(
         shot_ranges=shot_ranges,
         config=config,
     )
+    spectral_frequencies, spectral_power_fraction, frequency_resolution, duration_s = _spectral_profile(
+        detrended,
+        displacement_valid,
+        fps=fps,
+        shot_ranges=shot_ranges,
+        config=config,
+    )
     finite = displacement_valid & np.isfinite(detrended)
     amplitude = float(np.median(np.abs(detrended[finite]))) if np.any(finite) else 0.0
     return {
@@ -80,7 +147,28 @@ def _track_signal(
         "cycles": cycles,
         "window_frames": window_frames,
         "amplitude_norm": amplitude,
+        "spectral_frequencies": spectral_frequencies,
+        "spectral_power_fraction": spectral_power_fraction,
+        "frequency_resolution_hz": frequency_resolution,
+        "duration_s": duration_s,
     }
+
+
+def _locked_power(row: dict[str, Any], candidate_frequency: float) -> float:
+    frequencies = row.get("spectral_frequencies")
+    power_fraction = row.get("spectral_power_fraction")
+    resolution = row.get("frequency_resolution_hz")
+    if not isinstance(frequencies, np.ndarray) or not isinstance(power_fraction, np.ndarray):
+        return 0.0
+    if frequencies.ndim != 1 or power_fraction.shape != frequencies.shape or not len(frequencies):
+        return 0.0
+    if not isinstance(resolution, (int, float)) or isinstance(resolution, bool) or float(resolution) <= 0.0:
+        return 0.0
+    nearest = int(np.argmin(np.abs(frequencies - candidate_frequency)))
+    if abs(float(frequencies[nearest]) - candidate_frequency) > 0.55 * float(resolution) + 1e-12:
+        return 0.0
+    value = float(power_fraction[nearest])
+    return value if math.isfinite(value) and value >= 0.0 else 0.0
 
 
 def _consensus_tracks(
@@ -89,64 +177,88 @@ def _consensus_tracks(
     fps: float,
     config: MicroMotionConfig,
 ) -> tuple[list[int], float | None, float, dict[str, Any]]:
-    analyzable = [row for row in evidence if row.get("frequency_hz") is not None]
-    qualified = [
+    del fps  # individual spectral grids already retain their physical resolution
+    analyzable = [
         row
-        for row in analyzable
-        if float(row["cycles"]) >= config.min_cycles
-        and float(row["amplitude_norm"]) >= config.min_amplitude_norm
-        and float(row["periodicity_score"]) >= TRACK_PERIODICITY_FLOOR
+        for row in evidence
+        if row.get("frequency_hz") is not None
+        and float(row.get("amplitude_norm", 0.0)) >= config.min_amplitude_norm
+        and float(row.get("duration_s", 0.0)) > 0.0
     ]
-    if not qualified:
+    if not analyzable:
         return [], None, 0.0, {
-            "candidate_track_count": len(analyzable),
+            "candidate_track_count": 0,
             "qualified_track_count": 0,
             "frequency_tolerance_hz": None,
             "consensus_periodicity_mean": 0.0,
         }
 
-    longest_window = max(int(row["window_frames"]) for row in qualified)
-    frequency_resolution = fps / max(longest_window, 1)
-    tolerance = max(0.20, 1.25 * frequency_resolution)
-    best_cluster: list[dict[str, Any]] = []
+    seed_frequencies = sorted(
+        {
+            round(float(row["frequency_hz"]), 9)
+            for row in analyzable
+            if float(row["frequency_hz"]) * float(row["duration_s"]) >= config.min_cycles
+        }
+    )
+    required_consensus = max(MIN_CONSENSUS_TRACKS, config.min_valid_points_per_frame)
+    best_selected: list[tuple[dict[str, Any], float]] = []
     best_score = -1.0
-    best_center = 0.0
-    for seed in qualified:
-        seed_frequency = float(seed["frequency_hz"])
-        cluster = [row for row in qualified if abs(float(row["frequency_hz"]) - seed_frequency) <= tolerance]
+    best_frequency: float | None = None
+    for candidate_frequency in seed_frequencies:
+        selected: list[tuple[dict[str, Any], float]] = []
+        for row in analyzable:
+            if candidate_frequency * float(row["duration_s"]) < config.min_cycles:
+                continue
+            locked_power = _locked_power(row, candidate_frequency)
+            if locked_power < TRACK_PERIODICITY_FLOOR:
+                continue
+            selected.append((row, locked_power))
+        if len(selected) < required_consensus:
+            continue
         score = sum(
-            float(row["periodicity_score"]) * math.sqrt(max(float(row["amplitude_norm"]), 1e-12))
-            for row in cluster
+            locked_power * math.sqrt(max(float(row["amplitude_norm"]), 1e-12))
+            for row, locked_power in selected
         )
-        if score > best_score or (math.isclose(score, best_score) and seed_frequency < best_center):
+        if score > best_score or (
+            math.isclose(score, best_score)
+            and (
+                len(selected) > len(best_selected)
+                or (
+                    len(selected) == len(best_selected)
+                    and (best_frequency is None or candidate_frequency < best_frequency)
+                )
+            )
+        ):
             best_score = score
-            best_cluster = cluster
-            best_center = seed_frequency
-    if len(best_cluster) < MIN_CONSENSUS_TRACKS:
+            best_selected = selected
+            best_frequency = candidate_frequency
+
+    resolutions = [
+        float(row["frequency_resolution_hz"])
+        for row in analyzable
+        if isinstance(row.get("frequency_resolution_hz"), (int, float))
+        and not isinstance(row.get("frequency_resolution_hz"), bool)
+        and float(row["frequency_resolution_hz"]) > 0.0
+    ]
+    tolerance = 0.55 * max(resolutions, default=0.0)
+    if best_frequency is None or len(best_selected) < required_consensus:
         return [], None, 0.0, {
             "candidate_track_count": len(analyzable),
-            "qualified_track_count": len(qualified),
-            "frequency_tolerance_hz": round(tolerance, 6),
+            "qualified_track_count": 0,
+            "selected_track_count": 0,
+            "frequency_tolerance_hz": round(tolerance, 6) if tolerance > 0.0 else None,
             "consensus_periodicity_mean": 0.0,
         }
 
-    weights = np.asarray(
-        [max(float(row["periodicity_score"]), 1e-6) for row in best_cluster],
-        dtype=np.float64,
-    )
-    frequencies = np.asarray([float(row["frequency_hz"]) for row in best_cluster], dtype=np.float64)
-    consensus_frequency = float(np.average(frequencies, weights=weights))
-    consensus_periodicity = float(np.average(
-        np.asarray([float(row["periodicity_score"]) for row in best_cluster], dtype=np.float64),
-        weights=weights,
-    ))
-    support_fraction = len(best_cluster) / max(len(analyzable), 1)
-    track_ids = sorted(int(row["track_id"]) for row in best_cluster)
-    return track_ids, consensus_frequency, support_fraction, {
+    locked_values = np.asarray([locked for _, locked in best_selected], dtype=np.float64)
+    consensus_periodicity = float(np.mean(locked_values))
+    support_fraction = len(best_selected) / max(len(analyzable), 1)
+    track_ids = sorted(int(row["track_id"]) for row, _ in best_selected)
+    return track_ids, best_frequency, support_fraction, {
         "candidate_track_count": len(analyzable),
-        "qualified_track_count": len(qualified),
+        "qualified_track_count": len(best_selected),
         "selected_track_count": len(track_ids),
-        "frequency_tolerance_hz": round(tolerance, 6),
+        "frequency_tolerance_hz": round(tolerance, 6) if tolerance > 0.0 else None,
         "consensus_periodicity_mean": round(consensus_periodicity, 6),
     }
 
@@ -359,7 +471,8 @@ def run_micro_motion_v2(
         amplitude_px_mask = finite_detrended & np.isfinite(torso_scale_px)
         amplitude_px = float(np.median(amplitude_px_values[amplitude_px_mask])) if np.any(amplitude_px_mask) else 0.0
 
-        has_consensus = len(selected_track_ids) >= MIN_CONSENSUS_TRACKS
+        required_consensus = max(MIN_CONSENSUS_TRACKS, config.min_valid_points_per_frame)
+        has_consensus = len(selected_track_ids) >= required_consensus
         has_periodic_evidence = (
             has_consensus
             and dominant_frequency is not None
@@ -404,7 +517,7 @@ def run_micro_motion_v2(
             "pose leakage is body-frame energy correlation weighted by frequency-consensus spatial support",
         ]
         if not selected_track_ids:
-            limitations.append("no per-track periodic consensus; whole-region signal retained only as unclassified evidence")
+            limitations.append("no per-track frequency-locked periodic consensus; whole-region signal retained only as unclassified evidence")
         if not camera_available or not camera_assessed:
             limitations.append("camera leakage could not be fully assessed; fail-closed leakage score applied")
         if not pose_assessed:
@@ -582,11 +695,7 @@ def run_micro_motion_v2(
         "characters": report_rows,
     }
     emitted[report_uri] = report
-    report_ref = {
-        "kind": "micro_motion_geometry",
-        "uri": report_uri,
-        "sha256": _json_sha256(report),
-    }
+    report_ref = {"kind": "micro_motion_geometry", "uri": report_uri, "sha256": _json_sha256(report)}
     extension = {
         "enabled": True,
         "algorithm": ALGORITHM,
