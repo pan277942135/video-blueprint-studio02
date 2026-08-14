@@ -1,8 +1,8 @@
 {
   "name": "Video Blueprint Gemini Project Pack",
-  "version": "0.11.0",
-  "current_epic": "E11",
-  "current_phase": "integrated_production_acceptance",
+  "version": "0.12.0",
+  "current_epic": "E12",
+  "current_phase": "representative_real_video_acceptance",
   "created_for": [
     "Gemini Code Assist",
     "Gemini CLI",
@@ -15,10 +15,11 @@
     "contracts/openapi.yaml",
     "contracts/example_blueprint.json"
   ],
-  "implemented_through": "E10",
+  "implemented_through": "E11",
   "integrated_acceptance_gate": "scripts/certify_full_stack_e11.py",
+  "real_video_acceptance_report": "scripts/evaluate_real_video_e12.py",
   "real_cv_models_allowed": true,
   "identity_recognition_allowed": false,
   "biometric_embeddings_allowed": false,
-  "next_gate_after_e11": "representative_user_real_video_acceptance"
+  "final_acceptance_requires_manual_frame_to_evidence_review": true
 }

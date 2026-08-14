@@ -46,50 +46,67 @@ Evidence-backed background photometry over inverse person masks. No semantic sce
 
 Production API/worker path routes through the highest implemented pipeline. Recursive artifact URI/hash validation, NPZ/RLE physical checks, safe ZIP paths, manifest coverage, and post-write Bundle verification are enforced.
 
-**Important limitation discovered after E10:** the E10 Bundle smoke certification intentionally disabled E4 point/dense motion and E5-E8 motion stages. Therefore E10 proves assembly/integrity but does not by itself prove that every implemented stage can run together in one job.
+## E11 — Integrated Production Acceptance [COMPLETE / CERTIFIED]
 
-## E11 — Integrated Production Acceptance [CURRENT]
+E11 closed the post-E10 integration gap by enabling point tracks, dense flow, camera motion, body-local frame, surface motion, micro-motion and environment evidence together in the same production job, then performing E10 physical Bundle verification.
 
-### Goal
-
-Close the integration gap before representative user-video acceptance.
-
-### Required path
-
-```text
-real-human deterministic stimulus
-  -> E1 media
-  -> E2 people
-  -> E3 pose
-  -> E4 person masks + sparse point motion + dense flow
-  -> E5 camera motion
-  -> E6 body-local frame
-  -> E7 residual surface motion
-  -> E8 geometry-only micro-motion
-  -> E9 environment photometry
-  -> E10 schema + artifact integrity + verified bundle.zip
-```
-
-### Primary gate
+Primary evidence:
 
 - `scripts/certify_full_stack_e11.py`
 - `.github/workflows/e11-integrated-acceptance.yml`
 
-### Acceptance
+The integrated certification succeeded with physical surface/micro-motion refs and zero artifact-integrity warnings. This proves the implemented stack can execute together; it **does not** prove representative real-video detail accuracy. The integrated stimulus itself demonstrated that a stage can report `succeeded` while a downstream module quality score remains low or zero.
 
-For the same production job:
+## E12 — Representative Real-Video Acceptance [CURRENT]
 
-- all enabled E4-E9 stages report `succeeded`
-- anonymous character evidence exists
-- physical surface and micro-motion signal refs exist
-- E9 environment evidence exists
-- canonical schema validation passes
-- every Blueprint artifact ref resolves safely and hashes correctly
-- final Bundle is reopened and independently verified
-- certified model hashes and privacy boundaries remain intact
+### Goal
 
-## E12 — Representative real-video acceptance [NEXT, NOT STARTED]
+Determine what the system actually captures from representative user videos, not merely whether the pipeline completes.
 
-Run the integrated production path on representative user-supplied videos covering realistic camera motion, body motion, occlusion, clothing/hair detail, lighting change, multiple shots and failure cases. Review machine-readable metrics **and** actual evidence outputs. Define accuracy/coverage regressions and acceptance thresholds from observed results.
+### Required input classes
 
-E12 must not declare success merely because the job completes or the Bundle is structurally valid.
+Representative videos should cover, over multiple samples where practical:
+
+- realistic camera pan/tilt/translation and handheld motion;
+- whole-body and limb motion;
+- partial occlusion and re-entry;
+- hair, loose clothing and other fine surface motion;
+- facial and hand detail where E3.2 is enabled;
+- lighting/exposure changes;
+- multiple shots and shot boundaries;
+- difficult/negative cases where evidence should fail closed.
+
+### Primary tooling
+
+- `scripts/run_pipeline_job.py` — run the production extraction path;
+- `scripts/evaluate_real_video_e12.py` — generate the evidence-first machine acceptance report;
+- `packages/pipeline_core/real_video_acceptance.py` — summarize stage status, module quality, character evidence, surface/micro-motion usability, rejection reasons, privacy and artifact integrity.
+
+### Machine gate
+
+The E12 report must distinguish:
+
+- physical/structural failure (`machine_gate=failed`);
+- structurally valid but quality-risk evidence (`machine_gate=needs_review`);
+- machine evidence without detected structural/quality warnings (`machine_gate=passed`).
+
+A machine pass is still **not final acceptance**.
+
+### Manual evidence review
+
+Final E12 acceptance remains `manual_frame_to_evidence_review_required`. Review source frames/video against extracted evidence for:
+
+- timing and shot alignment;
+- person-track continuity;
+- pose alignment;
+- mask boundaries around hair/clothing/hands/occluders;
+- camera compensation versus true subject motion;
+- body-local stability;
+- surface residual motion;
+- micro-motion quality gates and leakage/dropout;
+- face/hand landmarks when enabled;
+- environment photometry under exposure/lighting change.
+
+### Acceptance principle
+
+E12 must never declare detail-extraction success solely because the job completed, the schema validated, a physical sidecar exists, or a stage says `succeeded`. Accuracy claims require representative real-video evidence and frame-to-evidence review.

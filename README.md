@@ -6,9 +6,9 @@ The project does **not** perform identity replacement or video generation, and i
 
 ## Current status
 
-Implemented and individually certified through **E10**. Current work is **E11 — Integrated Production Acceptance**.
+Implemented and certified through **E11 Integrated Production Acceptance**. Current work is **E12 — Representative Real-Video Acceptance**.
 
-E11 exists because isolated green stage certifications plus a valid Bundle are not sufficient: the production path must also prove that the implemented E4-E9 evidence stages can run together in the **same job** before representative user-video testing.
+E11 proved that the implemented E4-E9 evidence stages can run together in one production job and produce an E10 physically verified Bundle. E12 now asks the more important question: **what details are actually captured accurately from representative real videos?**
 
 See `START_HERE.md`, `GEMINI.md`, and `docs/epic-plan.md` for the current acceptance boundary.
 
@@ -30,7 +30,7 @@ source video
   -> verified bundle.zip
 ```
 
-Higher evidence stages are opt-in and fail closed through configuration gates. A disabled stage is not equivalent to a certified integrated stage.
+Higher evidence stages are opt-in and fail closed through configuration gates. A disabled stage is not equivalent to an accepted detail extractor.
 
 ## Prerequisites
 
@@ -76,7 +76,23 @@ scripts/certify_full_stack_e11.py
 
 It enables sparse point motion, dense flow, camera motion, body-local frame, surface residual motion, micro-motion, and environment photometry together, then requires canonical Blueprint validation, recursive artifact integrity, and post-write ZIP verification from the same job.
 
-The CI workflow provisions the certified detector/pose/mask runtime and deterministic real-human acceptance stimulus.
+## E12 real-video acceptance
+
+Generate a production Bundle with the normal production runtime, then create the machine evidence report:
+
+```bash
+python scripts/evaluate_real_video_e12.py \
+  --bundle /path/to/bundle.zip \
+  --output /path/to/e12_real_video_acceptance.json
+```
+
+The report distinguishes:
+
+- `machine_gate=failed`: missing/failed core stages or broken physical evidence;
+- `machine_gate=needs_review`: structurally valid output with quality risks such as low/zero module scores, disabled face/hands, or no usable micro-motion;
+- `machine_gate=passed`: no machine diagnostics were triggered.
+
+Even `machine_gate=passed` is **not final perceptual acceptance**. Final status remains `manual_frame_to_evidence_review_required` until source frames/video are compared with tracking, pose, mask, camera/body, surface/micro-motion and environment evidence.
 
 ## Validation model
 
@@ -88,7 +104,8 @@ Validation is layered:
 - module-specific evidence/quality checks
 - fail-closed micro-motion quality gates
 - integrated production acceptance
-- representative real-video acceptance
+- representative real-video machine diagnostics
+- manual frame-to-evidence review
 
 A structurally valid Bundle is necessary but is **not** sufficient proof that a real video's fine details were extracted accurately.
 

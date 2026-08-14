@@ -4,20 +4,22 @@ Use Gemini / AI Studio as an implementation and verification agent for Video Blu
 
 ## Current phase
 
-**Epic E11 — Integrated Production Acceptance (CURRENT).**
+**Epic E12 — Representative Real-Video Acceptance (CURRENT).**
 
-E0-E10 implementation has reached `main`. Do not restart the project from E0 and do not remove real CV stages that are already certified individually.
+E0-E11 has reached `main`. E11 proved that the implemented E4-E9 evidence stages can run together in one production job and produce an E10 physically verified Bundle. Do not restart from E0 and do not interpret that integration result as proof of fine-detail extraction accuracy.
 
 Read `GEMINI.md`, `docs/epic-plan.md`, the canonical contracts, and the current production pipeline before changing code.
 
 ## Current task
 
-Prove one production job can run the implemented evidence stack together:
+Run representative user-supplied real videos through the integrated production path, then evaluate both machine-readable evidence and actual frame-to-evidence alignment.
 
-`real media -> E1 media -> E2 people -> E3 pose/face/hands -> E4 masks/point/dense motion -> E5 camera -> E6 body-local -> E7 surface motion -> E8 micro-motion -> E9 environment -> E10 verified bundle`
+Use:
 
-Use `scripts/certify_full_stack_e11.py` and `.github/workflows/e11-integrated-acceptance.yml` as the acceptance gate.
+- `scripts/run_pipeline_job.py` to produce the real production Bundle;
+- `scripts/evaluate_real_video_e12.py` to generate the evidence-first acceptance report;
+- `packages/pipeline_core/real_video_acceptance.py` for diagnostic logic.
 
-Do not claim production readiness merely because schema validation, unit tests, or isolated stage certifications pass. E11 requires integrated evidence and a physically verified bundle from the same job.
+A stage marked `succeeded` is not sufficient acceptance. E12 must explicitly review low/zero module scores, disabled face/hand refinement, mask boundaries, tracking continuity, camera/body compensation, surface-motion evidence, micro-motion usability/rejection reasons, and artifact integrity.
 
-After E11 integrated certification passes, the next gate is representative user-supplied real-video acceptance and qualitative/quantitative review of extracted evidence.
+Final acceptance remains `manual_frame_to_evidence_review_required` until the representative source frames and extracted evidence are reviewed together.

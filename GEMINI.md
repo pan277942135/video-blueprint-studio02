@@ -8,15 +8,13 @@ The system converts an authorized source video into a structured, reproducible *
 
 **M1 does not replace a person and does not generate a new video.**
 
-## 2. Current implementation phase: E11
+## 2. Current implementation phase: E12
 
-The repository has progressed through E0-E10. The current phase is:
+The repository has progressed through E0-E11. The current phase is:
 
-**Epic E11 — Integrated Production Acceptance.**
+**Epic E12 — Representative Real-Video Acceptance.**
 
-Do not restart from E0, replace existing real stages with mocks, or disable higher stages simply to obtain a green result.
-
-The immediate goal is to prove that the already implemented stages can execute together in one production job and produce one physically verified Bundle.
+E11 proved the integrated production stack can execute together and produce a physically verified Bundle. It did **not** prove that representative real-video details are captured accurately. Do not restart from E0, replace existing real stages with mocks, disable stages merely to obtain green output, or treat `succeeded` as a perceptual-accuracy claim.
 
 ### Implemented evidence lineage
 
@@ -31,9 +29,8 @@ The immediate goal is to prove that the already implemented stages can execute t
 - E8: geometry-only micro-motion with leakage/quality gates
 - E9: evidence-backed environment photometry
 - E10: production dispatch, recursive artifact integrity, verified Bundle assembly
-- E11: integrated full-stack certification, then representative real-video acceptance
-
-Individual stage certifications are necessary but are not sufficient evidence for integrated readiness.
+- E11: integrated E4-E9 production certification through E10 Bundle integrity
+- E12: representative real-video evidence and accuracy acceptance
 
 ## 3. Canonical sources
 
@@ -64,7 +61,7 @@ If prose conflicts with the JSON Schema, **do not silently change the schema**. 
 10. Camera/body/observation failures must fail closed for micro-motion usability.
 11. Do not export biometric identity embeddings or infer age, health, emotion, sexuality, or other sensitive personal attributes.
 12. Do not interpret scene semantics, weather, or materials unless a future explicitly approved evidence source is added.
-13. A green schema is not proof of extraction accuracy. Separate structural integrity from evidence quality.
+13. A green schema or green CI is not proof of extraction accuracy. Separate structural integrity from evidence quality.
 
 ## 5. Current production path
 
@@ -84,43 +81,45 @@ source video
   -> verified bundle.zip
 ```
 
-Higher stages are opt-in/fail-closed through their environment gates. E11 certification intentionally enables the implemented E4-E9 evidence stages together.
+Higher stages are opt-in/fail-closed through their environment gates.
 
-## 6. E11 acceptance gate
+## 6. E12 acceptance workflow
 
 Primary files:
 
-- `scripts/certify_full_stack_e11.py`
-- `.github/workflows/e11-integrated-acceptance.yml`
+- `scripts/run_pipeline_job.py` — production Bundle generation
+- `scripts/evaluate_real_video_e12.py` — Bundle acceptance report CLI
+- `packages/pipeline_core/real_video_acceptance.py` — evidence diagnostics
+- `docs/epic-plan.md` — representative-video acceptance scope
 
-Do not claim E11 integrated certification complete until all are true for the **same production job**:
+For each representative real video:
 
-- certified detector, pose, and mask checkpoint hashes are verified
-- point tracks succeed
-- dense flow succeeds
-- camera motion succeeds
-- body-local frame succeeds
-- surface motion succeeds
-- micro-motion succeeds and emits physical signal refs
-- environment photometry succeeds
-- at least one anonymous character and physical surface/micro-motion region exist in the deterministic acceptance stimulus
-- canonical Blueprint validation passes
-- every referenced artifact resolves and hashes correctly
-- the final ZIP is reopened and independently verified
-- privacy/evidence boundaries remain intact
+1. Run the integrated production path with the approved model/runtime configuration.
+2. Preserve the source SHA, Blueprint, validation report, physical sidecars and final Bundle.
+3. Run `scripts/evaluate_real_video_e12.py` on the Bundle.
+4. Inspect machine diagnostics, including:
+   - core stage status;
+   - module scores and zero/low scores despite succeeded stages;
+   - track/pose/face/hand quality where available;
+   - surface-region count;
+   - micro-motion usable ratio and exact rejection reasons;
+   - artifact-integrity warnings;
+   - privacy invariants.
+5. Review source frames/video against evidence overlays/time series. Pay special attention to hair/clothing/hands/occlusion boundaries and to camera/body leakage into residual motion.
+6. Keep final acceptance as `manual_frame_to_evidence_review_required` until that frame-to-evidence review is complete.
 
-After that gate is green, the next step is representative user-supplied real-video acceptance. That phase must review both machine-readable metrics and the actual extracted evidence; it must not equate “pipeline completed” with “details were captured correctly.”
+A structurally valid Bundle with physical sidecars is necessary but not sufficient. If a module score is zero/low, or micro-motion evidence is emitted but fails its usability gates, report that condition explicitly rather than calling the extractor accurate.
 
 ## 7. Work style for Gemini / AI Studio
 
-For every coding task:
+For every coding or acceptance task:
 
 1. Inspect current `main` and active PR/branch first.
-2. Identify the active acceptance gap from evidence, not from stale prose.
-3. State the smallest target and preserve already certified behavior.
-4. Modify the minimum number of files.
-5. Add or strengthen tests/certification evidence with each change.
-6. Run the relevant contract, unit/integration, lint/type, and stage certification gates.
-7. Report exact changed files, commands, failures, outputs, and residual risks.
-8. Never weaken a fail-closed gate, disable a stage, or fabricate evidence just to make CI green.
-9. Stop at the current phase boundary unless a new phase is explicitly approved.
+2. Identify the active gap from evidence, not stale prose.
+3. Preserve already certified behavior and fail-closed semantics.
+4. Modify the minimum number of files needed.
+5. Add or strengthen tests/evidence with each change.
+6. Run relevant contract, unit/integration, lint/type and certification gates.
+7. Report exact changed files, commands, failures, outputs and residual risks.
+8. Never weaken quality gates, disable a stage, fabricate evidence, or reinterpret a zero/low score simply to obtain a pass.
+9. During E12, separate machine integrity from perceptual accuracy and require representative real-video review before final acceptance.
